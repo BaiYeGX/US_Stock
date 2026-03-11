@@ -43,4 +43,18 @@ def create_all(conn) -> None:
         reason TEXT,
         metrics_json TEXT
     )""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS interval_snapshots (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        trade_date TEXT,
+        slot_index INTEGER,
+        slot_time TEXT,
+        generated_at TEXT,
+        symbol_count INTEGER,
+        active_symbol_count INTEGER,
+        top_symbols_json TEXT,
+        avg_last_price REAL,
+        alert_count INTEGER,
+        payload_json TEXT,
+        UNIQUE(trade_date, slot_index)
+    )""")
     conn.commit()

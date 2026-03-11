@@ -2,6 +2,12 @@
 
 美股盘中手动交易扫描助手（MVP）。目标是盘中扫描并输出可人工执行的结构化交易计划，不自动下单、不做投资建议。
 
+## 0. 现在是实时还是预设？
+- `premarket-scan` 当前默认用 `MockProvider`，属于**预设/模拟数据流程**，用于本地调试。
+- `market-loop`：
+  - `--mock` 时是模拟。
+  - 不加 `--mock` 且提供 `POLYGON_API_KEY` 时，走 `PolygonProvider` WebSocket + REST 回补，属于**真实实时行情接入**。
+
 ## 1. 项目目标
 - 盘前构建候选池（watchlist）。
 - 盘中持续更新状态并识别 3 个 setup：ORB / VWAP_RECLAIM / HOD_BREAKOUT。
@@ -102,7 +108,8 @@ python -m app.cli review --scan-date 2026-03-11
 - `GET /health`
 - `GET /api/watchlist?scan_date=YYYY-MM-DD`
 - `GET /api/alerts/latest?limit=20`
-- `GET /` 仪表盘页面（watchlist + alerts）
+- `GET /api/interval-snapshots?scan_date=YYYY-MM-DD`
+- `GET /` 仪表盘页面（watchlist + alerts + interval snapshots）
 
 ## 7. 数据模型
 核心 schema 在 `app/providers/base.py`（AssetMeta/Bar/Quote/Trade/Snapshot/NewsItem），状态模型在 `app/state/symbol_state.py`，告警 schema 在 `app/alerts/schemas.py`。
@@ -112,13 +119,33 @@ python -m app.cli review --scan-date 2026-03-11
 - **VWAP_RECLAIM**：09:45~13:30 两根 1m 重新站回 VWAP。
 - **HOD_BREAKOUT**：10:00~11:30 与 14:00~15:30 贴近日高并突破。
 
-## 9. 评分体系
-- **PMS**（盘前评分）：Gap / PMDollarVol / ATR / PrevDayTrend / Catalyst 加权。
-- **IAS**（盘中评分）：Setup / RS / Activity / Liquidity / MarketAlignment / Room 加权。
+## 9. 评分体系（股票评选给分原则）
+### 9.1 盘前评分 PMS（决定重点盯谁）
+`PMS = 0.30*Gap + 0.25*PMDollarVol + 0.20*ATR + 0.15*PrevDayTrend + 0.10*Catalyst`
+- Gap：隔夜/盘前跳空幅度越大（按横截面分位）分越高。
+- PMDollarVol：盘前成交额越大分越高。
+- ATR：20日 ATR% 越高分越高。
+- PrevDayTrend：前日趋势位置强分更高。
+- Catalyst：有财报/评级/新闻催化可加分。
+
+### 9.2 盘中评分 IAS（决定是否发出手动计划）
+`IAS = 0.25*Setup + 0.20*RS + 0.20*Activity + 0.15*Liquidity + 0.10*MarketAlign + 0.10*Room`
+- Setup：setup 条件满足度。
+- RS：相对基准/板块强度。
+- Activity：RVOL 与 ATR 活跃度。
+- Liquidity：点差与成交额质量。
+- MarketAlign：与大盘环境一致性。
+- Room：目标空间与风险距离比。
+
+### 9.3 评级
+- A：IAS >= 80
+- B：70 <= IAS < 80
+- C：IAS < 70（记录，不提示）
 
 ## 10. 当前可达到的程度（你最关心）
 - ✅ 可做：盘前 watchlist、规则驱动 setup 扫描、评分、告警结构化输出、数据库落地、基础复盘、UI 浏览。
 - ✅ 可做：真实 Polygon WebSocket 接入与自动重连；断线后按最近时间戳做分钟线回补，尽量补齐状态。
+- ✅ 新增：从开盘 0 分钟（09:30）开始，每 30 分钟记录一次生成信息（slot#0~13），直到 16:00 收盘。
 - ⚠️ 暂未做满：回补目前以分钟线为主（非逐笔 tick 全量回放）；多源一致性、复杂风控与生产级监控告警需要下一版强化。
 
 ## 11. 测试

@@ -85,7 +85,7 @@ def main() -> None:
         else:
             symbols = ["NVDA", "AAPL", "TSLA"] if args.mock else ["SPY", "QQQ", "NVDA", "AAPL", "TSLA"]
         print(f"starting market loop for {symbols} (mock={args.mock})")
-        loop = RealtimeMarketLoop(provider=provider, symbols=symbols)
+        loop = RealtimeMarketLoop(provider=provider, symbols=symbols, repo=repo)
         asyncio.run(loop.run())
     elif args.cmd == "review":
         summary = run_review(repo.session_factory, date.fromisoformat(args.scan_date))

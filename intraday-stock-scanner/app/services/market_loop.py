@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from app.scoring.filters import hard_filter
 from app.scoring.intraday_score import compute_ias
@@ -11,17 +11,46 @@ from app.setups.orb import detect_orb
 from app.setups.vwap_reclaim import detect_vwap_reclaim
 from app.state.state_store import StateStore
 
+NY_TZ = ZoneInfo("America/New_York")
+MARKET_OPEN = time(9, 30)
+MARKET_CLOSE = time(16, 0)
+
+
+def _minutes_from_open(ts_et: datetime) -> int:
+    current = ts_et.hour * 60 + ts_et.minute
+    open_min = MARKET_OPEN.hour * 60 + MARKET_OPEN.minute
+    return current - open_min
+
+
+def half_hour_slot_index(ts_et: datetime) -> int | None:
+    """Return slot index from open(0) every 30m until close(13)."""
+    t = ts_et.timetz().replace(tzinfo=None)
+    if t < MARKET_OPEN or t > MARKET_CLOSE:
+        return None
+    minutes = _minutes_from_open(ts_et)
+    idx = minutes // 30
+    return max(0, min(13, idx))
+
+
+def slot_time_label(slot_index: int) -> str:
+    minutes = slot_index * 30
+    base = datetime(2000, 1, 1, MARKET_OPEN.hour, MARKET_OPEN.minute)
+    return (base + timedelta(minutes=minutes)).strftime("%H:%M")
+
 
 class RealtimeMarketLoop:
-    """Realtime loop: streaming minute bars + reconnect backfill + setup scan."""
+    """Realtime loop: streaming minute bars + reconnect backfill + setup scan + 30m snapshots."""
 
-    def __init__(self, provider, symbols: list[str]) -> None:
+    def __init__(self, provider, symbols: list[str], repo=None) -> None:
         self.provider = provider
         self.symbols = symbols
+        self.repo = repo
         self.store = StateStore()
         self.last_bar_ts: dict[str, datetime] = {}
         self.regime = "choppy"
         self._reconnected = False
+        self._recorded_slots: set[tuple[str, int]] = set()
+        self._alert_count = 0
 
     async def _on_minute_bar(self, event: dict) -> None:
         if event.get("ev") == "SYSTEM" and event.get("type") == "reconnected":
@@ -67,6 +96,45 @@ class RealtimeMarketLoop:
                 state.cumulative_volume += bar.volume
                 self.last_bar_ts[symbol] = bar.ts
 
+    def _record_interval_snapshot(self, now_utc: datetime) -> None:
+        if not self.repo:
+            return
+        now_et = now_utc.astimezone(NY_TZ)
+        slot = half_hour_slot_index(now_et)
+        if slot is None:
+            return
+        trade_date = now_et.date().isoformat()
+        key = (trade_date, slot)
+        if key in self._recorded_slots:
+            return
+
+        states = list(self.store.symbols.values())
+        symbol_count = len(states)
+        active = [s for s in states if s.last_price is not None]
+        active_symbol_count = len(active)
+        avg_last_price = round(sum(s.last_price or 0 for s in active) / active_symbol_count, 4) if active_symbol_count else 0.0
+        ranked = sorted(active, key=lambda s: s.cumulative_volume, reverse=True)
+        top_symbols = [s.symbol for s in ranked[:5]]
+        payload = {
+            "market_regime": self.regime,
+            "symbols": [s.symbol for s in states],
+            "top_by_volume": top_symbols,
+            "captured_at_et": now_et.isoformat(),
+        }
+        self.repo.save_interval_snapshot(
+            trade_date=trade_date,
+            slot_index=slot,
+            slot_time=slot_time_label(slot),
+            generated_at=now_utc.isoformat(),
+            symbol_count=symbol_count,
+            active_symbol_count=active_symbol_count,
+            top_symbols=top_symbols,
+            avg_last_price=avg_last_price,
+            alert_count=self._alert_count,
+            payload=payload,
+        )
+        self._recorded_slots.add(key)
+
     async def run(self) -> None:
         async def callback(event):
             await self._on_minute_bar(event)
@@ -74,14 +142,15 @@ class RealtimeMarketLoop:
         async def runner():
             await self.provider.stream_minute_bars(self.symbols, callback)
 
-        # provider stream handles reconnect; we periodically run scans and backfill.
         task = asyncio.create_task(runner())
         try:
             while True:
-                await asyncio.sleep(60)
+                now = datetime.now(tz=timezone.utc)
+                self._record_interval_snapshot(now)
                 if self._reconnected:
                     await self._backfill_after_reconnect()
                     self._reconnected = False
+                await asyncio.sleep(30)
         finally:
             task.cancel()
 
