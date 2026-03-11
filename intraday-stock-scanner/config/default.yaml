@@ -1,0 +1,93 @@
+app:
+  timezone: "America/New_York"
+  benchmark_symbols: ["SPY", "QQQ"]
+  sector_etf_map:
+    Technology: "XLK"
+    Semiconductors: "SMH"
+    Energy: "XLE"
+    Financials: "XLF"
+    Healthcare: "XLV"
+  market_hours:
+    open: "09:30"
+    close: "16:00"
+
+provider:
+  name: "polygon"
+  rest_base_url: "https://api.polygon.io"
+  ws_base_url: "wss://socket.polygon.io"
+  api_key_env: "POLYGON_API_KEY"
+  use_adjusted: true
+
+universe:
+  min_price: 5
+  max_price: 250
+  min_avg_dollar_volume_20d: 30000000
+  min_atr20_pct: 2.5
+  watchlist_size: 100
+  include_etf: true
+  exclude_symbols: []
+  include_symbols_override: []
+
+filters:
+  max_spread_pct: 0.15
+  min_rvol_20: 1.5
+  require_complete_data: true
+
+regime:
+  lookback_minutes: 30
+  choppy_vwap_band_pct: 0.15
+
+setups:
+  orb:
+    enabled: true
+    open_range_minutes: 5
+    start_time: "09:35"
+    end_time: "10:15"
+    breakout_buffer_pct: 0.10
+    volume_multiplier: 1.8
+    max_risk_pct: 1.2
+  vwap_reclaim:
+    enabled: true
+    start_time: "09:45"
+    end_time: "13:30"
+    volume_multiplier: 1.3
+    max_risk_pct: 1.0
+  hod_breakout:
+    enabled: true
+    windows:
+      - ["10:00", "11:30"]
+      - ["14:00", "15:30"]
+    proximity_to_hod_pct: 0.3
+    consolidation_depth_ratio: 0.35
+    volume_multiplier: 1.5
+    max_risk_pct: 1.2
+
+scoring:
+  pms_weights:
+    gap: 0.30
+    pm_dollar_vol: 0.25
+    atr: 0.20
+    prev_day_trend: 0.15
+    catalyst: 0.10
+  ias_weights:
+    setup: 0.25
+    relative_strength: 0.20
+    activity: 0.20
+    liquidity: 0.15
+    market_alignment: 0.10
+    room: 0.10
+  thresholds:
+    min_setup_score_for_alert: 60
+    grade_a: 80
+    grade_b: 70
+    max_a_count: 3
+    max_b_count: 2
+
+alerts:
+  cooldown_minutes: 5
+  min_rr_tp1: 1.0
+  output_text: true
+  output_json: true
+
+journal:
+  horizons_minutes: [5, 10, 20, 30]
