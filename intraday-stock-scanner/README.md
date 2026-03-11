@@ -15,6 +15,8 @@
 - Hard filters（可追踪拒绝原因）
 - SQLite 持久化
 - CLI 工作流：premarket-scan / market-loop / review / replay-alerts / seed-universe
+- 可视化 UI（FastAPI）：watchlist + latest alerts 面板
+- 真实 WebSocket（Polygon）接入、自动重连与分钟线回补机制
 
 ### 不包含
 - 自动下单
@@ -40,9 +42,21 @@ cp .env.example .env
 python -m app.cli premarket-scan --scan-date 2026-03-11
 ```
 
-### 盘中循环（MVP skeleton）
+### 盘中循环（Mock）
 ```bash
-python -m app.cli market-loop
+python -m app.cli market-loop --mock --symbols NVDA,AAPL,TSLA
+```
+
+### 盘中循环（真实 Polygon）
+```bash
+export POLYGON_API_KEY=xxx
+python -m app.cli market-loop --symbols SPY,QQQ,NVDA,AAPL,TSLA
+```
+
+### 启动 UI
+```bash
+python -m app.cli serve-ui --host 127.0.0.1 --port 8000
+# 打开 http://127.0.0.1:8000
 ```
 
 ### 收盘复盘
@@ -50,53 +64,40 @@ python -m app.cli market-loop
 python -m app.cli review --scan-date 2026-03-11
 ```
 
-### 回放告警
-```bash
-python -m app.cli replay-alerts --scan-date 2026-03-11
-```
+## 6. API/UI
+- `GET /health`
+- `GET /api/watchlist?scan_date=YYYY-MM-DD`
+- `GET /api/alerts/latest?limit=20`
+- `GET /` 仪表盘页面（watchlist + alerts）
 
-### 种子标的
-```bash
-python -m app.cli seed-universe
-```
-
-## 6. 数据模型
+## 7. 数据模型
 核心 schema 在 `app/providers/base.py`（AssetMeta/Bar/Quote/Trade/Snapshot/NewsItem），状态模型在 `app/state/symbol_state.py`，告警 schema 在 `app/alerts/schemas.py`。
 
-## 7. setup 规则（摘要）
+## 8. setup 规则（摘要）
 - **ORB**：09:35~10:15 突破开盘区间并站上 VWAP。
 - **VWAP_RECLAIM**：09:45~13:30 两根 1m 重新站回 VWAP。
 - **HOD_BREAKOUT**：10:00~11:30 与 14:00~15:30 贴近日高并突破。
 
-> 详细阈值全部通过 config 管理，避免魔法数字散落。
-
-## 8. 评分体系
+## 9. 评分体系
 - **PMS**（盘前评分）：Gap / PMDollarVol / ATR / PrevDayTrend / Catalyst 加权。
 - **IAS**（盘中评分）：Setup / RS / Activity / Liquidity / MarketAlignment / Room 加权。
-- 评级：A(>=80) / B(70~79.99) / C(<70,仅记录不提示)
 
-## 9. 数据库
-SQLAlchemy 表：
-- assets
-- daily_stats
-- watchlist_snapshots
-- alerts
-- alert_outcomes
-- filter_rejections
+## 10. 当前可达到的程度（你最关心）
+- ✅ 可做：盘前 watchlist、规则驱动 setup 扫描、评分、告警结构化输出、数据库落地、基础复盘、UI 浏览。
+- ✅ 可做：真实 Polygon WebSocket 接入与自动重连；断线后按最近时间戳做分钟线回补，尽量补齐状态。
+- ⚠️ 暂未做满：回补目前以分钟线为主（非逐笔 tick 全量回放）；多源一致性、复杂风控与生产级监控告警需要下一版强化。
 
-## 10. 测试
+## 11. 测试
 ```bash
 pytest
 ```
-覆盖：特征、三类 setup、过滤、评分、alert 生成、regime、时间窗口与容错。
 
-## 11. 风险提示
+## 12. 风险提示
 - 本工具不构成投资建议。
 - 本工具不自动下单。
 - 本工具不保证收益。
 
-## 12. 路线图 / TODO
-- **V2**：加入表格模型排序（仍以规则引擎为主）。
+## 13. 路线图 / TODO
+- **V2**：加入更完整 market-loop orchestrator（regime + setups + alerts + dedupe 全链路实时落库）。
+- **V2**：增强回补策略（按 symbol/窗口分片拉取、防重复、防漏洞）。
 - **V3**：加入 LLM 解释层（解释信号，不替代策略判定）。
-- 加强 websocket 重连后状态回补。
-- 增加 FastAPI 只读接口与更完整复盘图表。
