@@ -95,13 +95,15 @@ def main() -> None:
     elif args.cmd == "seed-universe":
         print("mock universe seeded logically")
     elif args.cmd == "serve-ui":
-        from app.ui.server import create_app
+        db_url = os.getenv("DATABASE_URL", "sqlite:///./scanner.db")
         try:
+            from app.ui.server import create_app
             import uvicorn
-        except Exception as exc:
-            raise RuntimeError("uvicorn is required for serve-ui") from exc
-        app = create_app(os.getenv("DATABASE_URL", "sqlite:///./scanner.db"))
-        uvicorn.run(app, host=args.host, port=args.port)
+            app = create_app(db_url)
+            uvicorn.run(app, host=args.host, port=args.port)
+        except Exception:
+            from app.ui.simple_server import run_simple_ui_server
+            run_simple_ui_server(db_url.replace("sqlite:///", ""), host=args.host, port=args.port)
 
 
 if __name__ == "__main__":

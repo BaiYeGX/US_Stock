@@ -57,6 +57,7 @@ python -m app.cli market-loop --symbols SPY,QQQ,NVDA,AAPL,TSLA
 ```bash
 python -m app.cli serve-ui --host 127.0.0.1 --port 8000
 # 打开 http://127.0.0.1:8000
+# 若 fastapi/uvicorn 不可用，会自动降级到内置 simple server
 ```
 
 ### 收盘复盘
