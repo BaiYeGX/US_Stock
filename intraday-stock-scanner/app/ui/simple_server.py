@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+from app.data.provider_service import MarketDataService
 from app.ui.server import _render_html, query_interval_snapshots, query_latest_alerts, query_today_watchlist
+
+_DATA_SERVICE = MarketDataService()
 
 
 def make_handler(db_path: str):
@@ -37,6 +41,50 @@ def make_handler(db_path: str):
                 scan_date = qs.get("scan_date", [date.today().isoformat()])[0]
                 data = query_interval_snapshots(db_path, scan_date)
                 self._send(200, json.dumps(data, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
+                return
+            if parsed.path == "/api/data/health":
+                source = qs.get("source", ["finnhub"])[0]
+                api_key = qs.get("api_key", [""])[0]
+                if not api_key:
+                    self._send(400, b'{"ok":false,"detail":"\u7f3a\u5c11 API \u5bc6\u94a5"}', "application/json; charset=utf-8")
+                    return
+                data = _DATA_SERVICE.health_check(source=source, api_key=api_key)
+                self._send(200 if data.get("ok") else 400, json.dumps(data, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
+                return
+            if parsed.path == "/api/data/quotes":
+                source = qs.get("source", ["finnhub"])[0]
+                api_key = qs.get("api_key", [""])[0]
+                symbols = qs.get("symbols", [""])[0]
+                pool = []
+                for s in [x.strip().upper() for x in symbols.split(",") if x.strip()]:
+                    if s not in pool and len(s) <= 10 and s.replace(".", "").replace("-", "").isalnum():
+                        pool.append(s)
+                pool = pool[:200]
+                if not api_key:
+                    self._send(400, b'{"ok":false,"detail":"\u7f3a\u5c11 API \u5bc6\u94a5"}', "application/json; charset=utf-8")
+                    return
+                try:
+                    items = []
+                    for symbol in pool:
+                        q = _DATA_SERVICE.get_quote(source=source, api_key=api_key, symbol=symbol, ttl=30)
+                        items.append({"symbol": symbol, "price": round(float(q.get("c", 0.0)), 4), "change_pct": round(float(q.get("dp", 0.0)), 3)})
+                    payload = {"ok": True, "items": items, "updated_at": time.time()}
+                    self._send(200, json.dumps(payload, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
+                except Exception as exc:
+                    self._send(400, json.dumps({"ok": False, "detail": str(exc)}, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
+                return
+            if parsed.path == "/api/data/news":
+                source = qs.get("source", ["finnhub"])[0]
+                api_key = qs.get("api_key", [""])[0]
+                symbol = qs.get("symbol", [""])[0]
+                if not api_key:
+                    self._send(400, b'{"ok":false,"detail":"\u7f3a\u5c11 API \u5bc6\u94a5"}', "application/json; charset=utf-8")
+                    return
+                try:
+                    items = _DATA_SERVICE.get_news(source=source, api_key=api_key, symbol=(symbol or None), ttl=120)
+                    self._send(200, json.dumps({"ok": True, "items": items}, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
+                except Exception as exc:
+                    self._send(400, json.dumps({"ok": False, "detail": str(exc)}, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
                 return
             if parsed.path == "/":
                 scan_date = qs.get("scan_date", [date.today().isoformat()])[0]

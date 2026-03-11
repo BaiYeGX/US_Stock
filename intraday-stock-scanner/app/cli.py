@@ -9,6 +9,7 @@ from app.db.migrations import create_all
 from app.db.session import make_session_factory
 from app.journal.repository import JournalRepository
 from app.providers.base import AssetMeta, BaseProvider, ProviderHealth
+from app.providers.finnhub import FinnhubProvider
 from app.services.market_loop import RealtimeMarketLoop
 from app.services.postmarket_review import run_review
 from app.services.premarket_scan import run_premarket_scan
@@ -45,12 +46,20 @@ def _repo():
 def _provider(use_mock: bool):
     if use_mock:
         return MockProvider()
-    api_key = os.getenv("POLYGON_API_KEY", "")
-    if not api_key:
-        raise RuntimeError("POLYGON_API_KEY is required for real-time market loop")
     settings = load_settings()
-    from app.providers.polygon import PolygonProvider
-    return PolygonProvider(base_url=settings.provider.rest_base_url, api_key=api_key, ws_base_url=settings.provider.ws_base_url)
+    source = (settings.provider.name or "finnhub").lower()
+    if source == "finnhub":
+        api_key = os.getenv("FINNHUB_API_KEY", "")
+        if not api_key:
+            raise RuntimeError("FINNHUB_API_KEY is required for real-time market loop")
+        return FinnhubProvider(api_key=api_key)
+    if source == "polygon":
+        api_key = os.getenv("POLYGON_API_KEY", "")
+        if not api_key:
+            raise RuntimeError("POLYGON_API_KEY is required for real-time market loop")
+        from app.providers.polygon import PolygonProvider
+        return PolygonProvider(base_url=settings.provider.rest_base_url, api_key=api_key, ws_base_url=settings.provider.ws_base_url)
+    raise RuntimeError(f"Unsupported provider: {source}")
 
 
 def main() -> None:
@@ -83,7 +92,7 @@ def main() -> None:
         if args.symbols:
             symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
         else:
-            symbols = ["NVDA", "AAPL", "TSLA"] if args.mock else ["SPY", "QQQ", "NVDA", "AAPL", "TSLA"]
+            symbols = ["NVDA", "AAPL", "TSLA"] if args.mock else ["AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "META", "AMD", "AVGO"]
         print(f"starting market loop for {symbols} (mock={args.mock})")
         loop = RealtimeMarketLoop(provider=provider, symbols=symbols, repo=repo)
         asyncio.run(loop.run())

@@ -12,10 +12,10 @@ app:
     close: "16:00"
 
 provider:
-  name: "polygon"
-  rest_base_url: "https://api.polygon.io"
-  ws_base_url: "wss://socket.polygon.io"
-  api_key_env: "POLYGON_API_KEY"
+  name: "finnhub"
+  rest_base_url: "https://finnhub.io/api/v1"
+  ws_base_url: ""
+  api_key_env: "FINNHUB_API_KEY"
   use_adjusted: true
 
 universe:

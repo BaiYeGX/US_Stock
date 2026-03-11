@@ -14,10 +14,10 @@ class AppSettings:
 
 @dataclass
 class ProviderSettings:
-    name: str = "polygon"
+    name: str = "finnhub"
     rest_base_url: str = ""
     ws_base_url: str = ""
-    api_key_env: str = "POLYGON_API_KEY"
+    api_key_env: str = "FINNHUB_API_KEY"
     use_adjusted: bool = True
 
 

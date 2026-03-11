@@ -79,17 +79,17 @@ python -m app.cli premarket-scan --scan-date 2026-03-11
 python -m app.cli market-loop --mock --symbols NVDA,AAPL,TSLA
 ```
 
-### 盘中循环（真实 Polygon）
+### 盘中循环（真实 Finnhub，默认）
 Linux/macOS:
 ```bash
-export POLYGON_API_KEY=xxx
-python -m app.cli market-loop --symbols SPY,QQQ,NVDA,AAPL,TSLA
+export FINNHUB_API_KEY=xxx
+python -m app.cli market-loop --symbols AAPL,MSFT,NVDA,TSLA,AMZN
 ```
 
 Windows PowerShell:
 ```powershell
-$env:POLYGON_API_KEY="xxx"
-python -m app.cli market-loop --symbols SPY,QQQ,NVDA,AAPL,TSLA
+$env:FINNHUB_API_KEY="xxx"
+python -m app.cli market-loop --symbols AAPL,MSFT,NVDA,TSLA,AMZN
 ```
 
 ### 启动 UI
@@ -104,12 +104,21 @@ python -m app.cli serve-ui --host 127.0.0.1 --port 8000
 python -m app.cli review --scan-date 2026-03-11
 ```
 
+## 5.1 数据来源改造说明（免费模式优先）
+- 默认主数据源改为 **Finnhub**。
+- 新增统一数据服务层：`app/data/provider_service.py`，前端/UI 不再直连第三方 URL。
+- 重点服务自选股票池（50~200 只），不再建议全市场高频轮询。
+- 内置缓存与限频：报价（30秒）、K线（60秒）、新闻（120秒）以降低免费额度消耗。
+
 ## 6. API/UI
 - `GET /health`
 - `GET /api/watchlist?scan_date=YYYY-MM-DD`
 - `GET /api/alerts/latest?limit=20`
 - `GET /api/interval-snapshots?scan_date=YYYY-MM-DD`
-- `GET /` 仪表盘页面（watchlist + alerts + interval snapshots）
+- `GET /api/data/health?source=finnhub&api_key=...`
+- `GET /api/data/quotes?source=finnhub&api_key=...&symbols=AAPL,MSFT`
+- `GET /api/data/news?source=finnhub&api_key=...&symbol=AAPL`
+- `GET /` 仪表盘页面（watchlist + alerts + interval snapshots + 数据源设置）
 
 ## 7. 数据模型
 核心 schema 在 `app/providers/base.py`（AssetMeta/Bar/Quote/Trade/Snapshot/NewsItem），状态模型在 `app/state/symbol_state.py`，告警 schema 在 `app/alerts/schemas.py`。
@@ -144,7 +153,7 @@ python -m app.cli review --scan-date 2026-03-11
 
 ## 10. 当前可达到的程度（你最关心）
 - ✅ 可做：盘前 watchlist、规则驱动 setup 扫描、评分、告警结构化输出、数据库落地、基础复盘、UI 浏览。
-- ✅ 可做：真实 Polygon WebSocket 接入与自动重连；断线后按最近时间戳做分钟线回补，尽量补齐状态。
+- ✅ 可做：默认 Finnhub 数据源接入（免费模式优先）与断线后分钟级回补，尽量补齐状态。
 - ✅ 新增：从开盘 0 分钟（09:30）开始，每 30 分钟记录一次生成信息（slot#0~13），直到 16:00 收盘。
 - ⚠️ 暂未做满：回补目前以分钟线为主（非逐笔 tick 全量回放）；多源一致性、复杂风控与生产级监控告警需要下一版强化。
 
