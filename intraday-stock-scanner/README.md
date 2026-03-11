@@ -25,10 +25,36 @@
 - 复杂 GUI / 高频 tick 级
 
 ## 3. 安装
+
+### 方案 A（推荐）：Poetry
 ```bash
 cd intraday-stock-scanner
 poetry install
 cp .env.example .env
+```
+
+如果提示 `poetry` 不存在（你现在遇到的就是这个）：
+
+**Windows PowerShell**
+```powershell
+python -m pip install -U poetry
+# 重新打开 PowerShell 后验证
+poetry --version
+```
+
+若仍找不到命令，可用：
+```powershell
+python -m poetry install
+```
+
+### 方案 B（无需 Poetry）：venv + pip
+```powershell
+cd intraday-stock-scanner
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -U pip
+pip install -r requirements.txt
+Copy-Item .env.example .env
 ```
 
 ## 4. 配置
@@ -48,8 +74,15 @@ python -m app.cli market-loop --mock --symbols NVDA,AAPL,TSLA
 ```
 
 ### 盘中循环（真实 Polygon）
+Linux/macOS:
 ```bash
 export POLYGON_API_KEY=xxx
+python -m app.cli market-loop --symbols SPY,QQQ,NVDA,AAPL,TSLA
+```
+
+Windows PowerShell:
+```powershell
+$env:POLYGON_API_KEY="xxx"
 python -m app.cli market-loop --symbols SPY,QQQ,NVDA,AAPL,TSLA
 ```
 
