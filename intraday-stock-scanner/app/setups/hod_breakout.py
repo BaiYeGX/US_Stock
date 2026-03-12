@@ -4,14 +4,19 @@ from app.setups.base import SetupSignal
 from app.state.symbol_state import SymbolState
 
 
-def detect_hod_breakout(state: SymbolState, now_hhmm: str = "10:30") -> SetupSignal | None:
+def detect_hod_breakout(state: SymbolState, now_hhmm: str = "10:30", params: dict | None = None) -> SetupSignal | None:
+    cfg = params or {}
+    windows = cfg.get("windows", [["10:00", "11:30"], ["14:00", "15:30"]])
+    proximity_to_hod_pct = float(cfg.get("proximity_to_hod_pct", 0.3))
+    max_spread_pct = float(cfg.get("max_spread_pct", 0.15))
+
     if not (state.intraday_high and state.last_price and state.vwap_session and state.spread_pct is not None):
         return None
-    in_window = ("10:00" <= now_hhmm <= "11:30") or ("14:00" <= now_hhmm <= "15:30")
+    in_window = any(start <= now_hhmm <= end for start, end in windows)
     if not in_window:
         return None
     distance = (state.intraday_high - state.last_price) / state.intraday_high * 100
-    if distance > 0.3 or state.last_price <= state.vwap_session or state.spread_pct > 0.15:
+    if distance > proximity_to_hod_pct or state.last_price <= state.vwap_session or state.spread_pct > max_spread_pct:
         return None
     entry = max(state.last_price, state.intraday_high * 1.0005)
     stop = state.intraday_high * 0.996

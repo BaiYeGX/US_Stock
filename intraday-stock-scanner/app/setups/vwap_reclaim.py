@@ -4,14 +4,19 @@ from app.setups.base import SetupSignal
 from app.state.symbol_state import SymbolState
 
 
-def detect_vwap_reclaim(state: SymbolState, closes: list[float], now_hhmm: str = "10:30") -> SetupSignal | None:
+def detect_vwap_reclaim(state: SymbolState, closes: list[float], now_hhmm: str = "10:30", params: dict | None = None) -> SetupSignal | None:
+    cfg = params or {}
+    start_time = str(cfg.get("start_time", "09:45"))
+    end_time = str(cfg.get("end_time", "13:30"))
+    max_spread_pct = float(cfg.get("max_spread_pct", 0.15))
+
     if not (state.vwap_session and state.last_price and state.spread_pct is not None):
         return None
-    if not ("09:45" <= now_hhmm <= "13:30") or len(closes) < 2:
+    if not (start_time <= now_hhmm <= end_time) or len(closes) < 2:
         return None
     if closes[-2] <= state.vwap_session or closes[-1] <= state.vwap_session:
         return None
-    if state.spread_pct > 0.15:
+    if state.spread_pct > max_spread_pct:
         return None
     entry = state.last_price
     stop = state.vwap_session - 0.05

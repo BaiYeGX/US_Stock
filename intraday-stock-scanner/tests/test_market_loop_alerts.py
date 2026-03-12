@@ -30,7 +30,7 @@ def test_scan_and_emit_alerts(monkeypatch):
     st.last_price = 100
 
     fake_signal = SimpleNamespace(setup="ORB")
-    monkeypatch.setattr("app.services.market_loop.evaluate_symbol", lambda state, now, pools, regime: (fake_signal, 85.0, []))
+    monkeypatch.setattr("app.services.market_loop.evaluate_symbol", lambda state, now, pools, regime, settings=None: (fake_signal, 85.0, []))
     monkeypatch.setattr(loop.alert_engine, "try_emit", lambda symbol, signal, score, now: {"symbol": symbol, "score": score})
 
     loop._scan_and_emit_alerts(datetime.now(tz=timezone.utc))
@@ -45,7 +45,7 @@ def test_scan_records_rejection(monkeypatch):
     st = loop.store.get_or_create("NVDA")
     st.last_price = 100
 
-    monkeypatch.setattr("app.services.market_loop.evaluate_symbol", lambda state, now, pools, regime: (None, None, ["spread_too_wide"]))
+    monkeypatch.setattr("app.services.market_loop.evaluate_symbol", lambda state, now, pools, regime, settings=None: (None, None, ["spread_too_wide"]))
 
     loop._scan_and_emit_alerts(datetime.now(tz=timezone.utc))
     assert len(repo.rejections) == 1

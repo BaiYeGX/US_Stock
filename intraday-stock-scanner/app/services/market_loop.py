@@ -12,6 +12,7 @@ from app.setups.hod_breakout import detect_hod_breakout
 from app.setups.orb import detect_orb
 from app.setups.vwap_reclaim import detect_vwap_reclaim
 from app.state.state_store import StateStore
+from app.settings import ScannerSettings, load_settings
 
 NY_TZ = ZoneInfo("America/New_York")
 MARKET_OPEN = time(9, 30)
@@ -43,17 +44,18 @@ def slot_time_label(slot_index: int) -> str:
 class RealtimeMarketLoop:
     """Realtime loop: streaming minute bars + reconnect backfill + setup scan + 30m snapshots."""
 
-    def __init__(self, provider, symbols: list[str], repo=None) -> None:
+    def __init__(self, provider, symbols: list[str], repo=None, settings: ScannerSettings | None = None) -> None:
         self.provider = provider
         self.symbols = symbols
         self.repo = repo
+        self.settings = settings or load_settings()
         self.store = StateStore()
         self.last_bar_ts: dict[str, datetime] = {}
         self.regime = "choppy"
         self._reconnected = False
         self._recorded_slots: set[tuple[str, int]] = set()
         self._alert_count = 0
-        self.alert_engine = AlertEngine(cooldown_minutes=5)
+        self.alert_engine = AlertEngine(cooldown_minutes=int(self.settings.alerts.get("cooldown_minutes", 5)))
 
     def _refresh_state_features(self, symbol: str) -> None:
         state = self.store.get_or_create(symbol)
@@ -180,6 +182,29 @@ class RealtimeMarketLoop:
             return
         self.regime = "choppy"
 
+    def _setup_config(self, key: str) -> dict:
+        cfg = self.settings.setups.get(key, {}) if self.settings else {}
+        return cfg if isinstance(cfg, dict) else {}
+
+    def _filter_config(self) -> dict[str, float]:
+        universe = self.settings.universe
+        filters = self.settings.filters
+        orb = self._setup_config("orb")
+        vwap = self._setup_config("vwap_reclaim")
+        hod = self._setup_config("hod_breakout")
+        max_risk_pct = max(
+            float(orb.get("max_risk_pct", 1.2)),
+            float(vwap.get("max_risk_pct", 1.0)),
+            float(hod.get("max_risk_pct", 1.2)),
+        )
+        return {
+            "min_dollar_vol": float(universe.min_avg_dollar_volume_20d),
+            "max_spread_pct": float(filters.max_spread_pct),
+            "min_rvol": float(filters.min_rvol_20),
+            "min_atr20_pct": float(universe.min_atr20_pct),
+            "max_risk_pct": max_risk_pct,
+        }
+
     def _record_interval_snapshot(self, now_utc: datetime) -> None:
         if not self.repo:
             return
@@ -241,7 +266,7 @@ class RealtimeMarketLoop:
             pools["room"].append(2.0)
 
         for st in states:
-            signal, score, reasons = evaluate_symbol(st, now_utc, pools, self.regime)
+            signal, score, reasons = evaluate_symbol(st, now_utc, pools, self.regime, self.settings)
             if not signal or score is None:
                 if self.repo and reasons and reasons != ["no_setup"]:
                     self.repo.save_rejection(now_utc, st.symbol, "NO_SETUP", ",".join(reasons), {"symbol": st.symbol})
@@ -273,12 +298,39 @@ class RealtimeMarketLoop:
             task.cancel()
 
 
-def evaluate_symbol(state, now: datetime, pools: dict[str, list[float]], regime: str) -> tuple[object | None, float | None, list[str]]:
-    signal = detect_orb(state, now.strftime("%H:%M")) or detect_vwap_reclaim(state, [b.close for b in state.minute_bars], now.strftime("%H:%M")) or detect_hod_breakout(state, now.strftime("%H:%M"))
+def evaluate_symbol(state, now: datetime, pools: dict[str, list[float]], regime: str, settings: ScannerSettings | None = None) -> tuple[object | None, float | None, list[str]]:
+    settings = settings or load_settings()
+    filter_cfg = {
+        "min_dollar_vol": float(settings.universe.min_avg_dollar_volume_20d),
+        "max_spread_pct": float(settings.filters.max_spread_pct),
+        "min_rvol": float(settings.filters.min_rvol_20),
+        "min_atr20_pct": float(settings.universe.min_atr20_pct),
+        "max_risk_pct": max(
+            float((settings.setups.get("orb", {}) or {}).get("max_risk_pct", 1.2)),
+            float((settings.setups.get("vwap_reclaim", {}) or {}).get("max_risk_pct", 1.0)),
+            float((settings.setups.get("hod_breakout", {}) or {}).get("max_risk_pct", 1.2)),
+        ),
+    }
+
+    signals = []
+    if (settings.setups.get("orb", {}) or {}).get("enabled", True):
+        signals.append(detect_orb(state, now.strftime("%H:%M"), {**(settings.setups.get("orb", {}) or {}), "max_spread_pct": filter_cfg["max_spread_pct"]}))
+    if (settings.setups.get("vwap_reclaim", {}) or {}).get("enabled", True):
+        signals.append(
+            detect_vwap_reclaim(
+                state,
+                [b.close for b in state.minute_bars],
+                now.strftime("%H:%M"),
+                {**(settings.setups.get("vwap_reclaim", {}) or {}), "max_spread_pct": filter_cfg["max_spread_pct"]},
+            )
+        )
+    if (settings.setups.get("hod_breakout", {}) or {}).get("enabled", True):
+        signals.append(detect_hod_breakout(state, now.strftime("%H:%M"), {**(settings.setups.get("hod_breakout", {}) or {}), "max_spread_pct": filter_cfg["max_spread_pct"]}))
+    signal = next((sig for sig in signals if sig), None)
     if not signal:
         return None, None, ["no_setup"]
     risk_pct = abs(signal.entry_high - signal.stop) / signal.entry_high * 100
-    fr = hard_filter(state, state.last_price or 0, 50_000_000, 0.15, 1.5, 2.5, 1.2, risk_pct)
+    fr = hard_filter(state, state.last_price or 0, filter_cfg["min_dollar_vol"], filter_cfg["max_spread_pct"], filter_cfg["min_rvol"], filter_cfg["min_atr20_pct"], filter_cfg["max_risk_pct"], risk_pct)
     if not fr.passed:
         return None, None, fr.reasons
     score = compute_ias(

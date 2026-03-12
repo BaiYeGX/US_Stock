@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta, timezone
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from app.constants import FIXED_SYMBOL_POOL
 from app.providers.base import (
     AssetMeta,
     Bar,
@@ -98,10 +99,45 @@ class FinnhubProvider(BaseProvider):
 
     # BaseProvider compatibility
     def get_universe_metadata(self) -> list[AssetMeta]:
-        return []
+        etf_symbols = {"QQQ", "SMH", "SPY", "SOXX"}
+        return [
+            AssetMeta(
+                symbol=symbol,
+                name=symbol,
+                asset_type="etf" if symbol in etf_symbols else "stock",
+                exchange="US",
+                is_active=True,
+                sector=None,
+                industry=None,
+            )
+            for symbol in FIXED_SYMBOL_POOL
+        ]
 
     def get_grouped_daily(self, day: date) -> list[Bar]:
-        return []
+        bars: list[Bar] = []
+        ts = datetime.combine(day, datetime.min.time(), tzinfo=timezone.utc)
+        for symbol in FIXED_SYMBOL_POOL:
+            try:
+                q = self.get_quote(symbol)
+            except ProviderError:
+                continue
+            close = float(q.get("c", 0.0))
+            open_ = float(q.get("o", close))
+            high = float(q.get("h", close))
+            low = float(q.get("l", close))
+            volume = float(q.get("v", 0.0))
+            bars.append(
+                Bar(
+                    symbol=symbol,
+                    ts=ts,
+                    open=open_,
+                    high=high,
+                    low=low,
+                    close=close,
+                    volume=volume,
+                )
+            )
+        return bars
 
     def get_daily_open_close(self, symbol: str, day: date) -> DailyOpenClose:
         q = self.get_quote(symbol)
