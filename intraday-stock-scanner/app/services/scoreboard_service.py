@@ -26,6 +26,12 @@ class ScoreBoardService:
         self.time_service = MarketTimeService()
         self.position_store = LocalPositionStore(session_factory)
 
+
+    def _fetch_order(self, unique_symbols: list[str], positions: dict[str, dict]) -> list[str]:
+        held = [s for s in unique_symbols if bool(positions.get(s, {}).get("isHeld", False))]
+        remain = [s for s in unique_symbols if s not in held]
+        return held + remain
+
     def _days_to_earnings(self, provider, symbol: str) -> int | None:
         today = datetime.now(tz=timezone.utc).date()
         end = today + timedelta(days=30)
@@ -57,7 +63,7 @@ class ScoreBoardService:
         end = datetime.now(tz=timezone.utc)
         start_daily = end - timedelta(days=220)
 
-        for symbol in unique_symbols:
+        for symbol in self._fetch_order(unique_symbols, positions):
             if self.budget.can_call_rest():
                 d = provider.get_historical_bars(symbol, "1d", start_daily, end)
                 self.budget.record_rest()
@@ -97,6 +103,7 @@ class ScoreBoardService:
             rows.append(row)
 
         ranked = rank_and_finalize(rows)
+        not_ready_count = sum(1 for r in ranked if not r.get("BuyEligible") and (r.get("fields", {}).get("reason") is not None or r.get("hard_filters", {}).get("not_ready") is not None))
 
         candidate_count = sum(1 for r in ranked if not r["isHeld"] and r["CandidateAction"] in {"MUST_WATCH_BUY", "STRONG_WATCH_BUY", "BUY_SMALL_IF_TRIGGERED"})
         held_count = sum(1 for r in ranked if r["isHeld"])
@@ -114,5 +121,6 @@ class ScoreBoardService:
                 "nextday_watch_count": nextday_count,
                 "updated_at": datetime.now(tz=timezone.utc).isoformat(),
                 "rest_budget": self.budget.snapshot(),
+                "not_ready_count": not_ready_count,
             },
         }

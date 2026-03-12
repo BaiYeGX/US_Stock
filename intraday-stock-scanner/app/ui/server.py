@@ -43,8 +43,7 @@ def create_app(db_url: str):
         return request.headers.get("X-API-Key", "").strip()
 
 
-    @app.on_event("startup")
-    async def startup_capture_snapshot() -> None:
+    async def _maybe_capture_official_snapshot() -> None:
         import os
 
         source = "finnhub"
@@ -54,11 +53,31 @@ def create_app(db_url: str):
         try:
             provider = scoreboard_service.data_service._provider(source, api_key)
             payload = provider.get_market_status() if hasattr(provider, "get_market_status") else {"market": "unknown"}
-            if time_service.get_today_close_trigger_window(payload):
-                close_snapshot_service.capture(source=source, api_key=api_key, generated_by="auto", force=False)
+            if not time_service.get_today_close_trigger_window(payload):
+                return
+            close_snapshot_service.capture(source=source, api_key=api_key, generated_by="auto", force=False)
         except Exception:
-            # 启动时兜底，不阻断服务
             return
+
+    @app.on_event("startup")
+    async def startup_capture_snapshot() -> None:
+        import asyncio
+
+        app.state._snapshot_task_running = True
+
+        async def _worker() -> None:
+            while app.state._snapshot_task_running:
+                await _maybe_capture_official_snapshot()
+                await asyncio.sleep(120)
+
+        app.state._snapshot_task = asyncio.create_task(_worker())
+
+    @app.on_event("shutdown")
+    async def shutdown_capture_snapshot() -> None:
+        app.state._snapshot_task_running = False
+        task = getattr(app.state, "_snapshot_task", None)
+        if task is not None:
+            task.cancel()
 
     @app.get("/health")
     def health():

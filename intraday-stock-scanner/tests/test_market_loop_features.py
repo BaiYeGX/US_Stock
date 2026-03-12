@@ -45,3 +45,16 @@ def test_refresh_relative_strength_sets_rs_fields():
     st = loop.store.get_or_create("NVDA")
     assert st.rs_vs_benchmark_15m is not None
     assert st.rs_vs_sector_15m is not None
+
+
+def test_update_regime_from_benchmark_trend():
+    loop = RealtimeMarketLoop(provider=DummyProvider(), symbols=["QQQ"])
+
+    import asyncio
+
+    for i in range(40):
+        # persistent upward drift
+        asyncio.run(loop._on_minute_bar(_event("QQQ", i % 60, 100, 102, 99, 100 + i * 0.2, 2000)))
+
+    loop._update_regime()
+    assert loop.regime in {"trend_up", "choppy"}

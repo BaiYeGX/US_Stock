@@ -41,3 +41,12 @@ def test_ny_close_timestamp_uses_zone_offset():
     # July should be DST -04:00, Jan should be -05:00
     assert mts.ny_close_timestamp("2026-07-10").endswith("-04:00")
     assert mts.ny_close_timestamp("2026-01-10").endswith("-05:00")
+
+
+def test_latest_completed_exchange_date_holiday_fallback(monkeypatch):
+    mts = MarketTimeService()
+    # 2026-01-20 Tue pre-close, previous day is MLK holiday, should fallback to 2026-01-16 Fri
+    fake_now = datetime(2026, 1, 20, 10, 0, tzinfo=ZoneInfo("America/New_York"))
+    monkeypatch.setattr(mts, "now_ny", lambda: fake_now)
+    out = mts.get_latest_completed_exchange_date(payload={"market": "open"})
+    assert out == date(2026, 1, 16).isoformat()

@@ -59,10 +59,64 @@ class MarketTimeService:
         close_dt = datetime(d.year, d.month, d.day, 16, 0, tzinfo=NY)
         return close_dt.isoformat()
 
+    @staticmethod
+    def _nth_weekday(year: int, month: int, weekday: int, n: int) -> date:
+        d = date(year, month, 1)
+        while d.weekday() != weekday:
+            d += timedelta(days=1)
+        d += timedelta(days=(n - 1) * 7)
+        return d
+
+    @staticmethod
+    def _last_weekday(year: int, month: int, weekday: int) -> date:
+        if month == 12:
+            d = date(year + 1, 1, 1) - timedelta(days=1)
+        else:
+            d = date(year, month + 1, 1) - timedelta(days=1)
+        while d.weekday() != weekday:
+            d -= timedelta(days=1)
+        return d
+
+    @staticmethod
+    def _observed(d: date) -> date:
+        if d.weekday() == 5:  # Saturday
+            return d - timedelta(days=1)
+        if d.weekday() == 6:  # Sunday
+            return d + timedelta(days=1)
+        return d
+
+    def _us_market_holidays(self, year: int) -> set[date]:
+        # Core US market holidays (without Good Friday for simplicity)
+        new_year = self._observed(date(year, 1, 1))
+        mlk = self._nth_weekday(year, 1, 0, 3)
+        presidents = self._nth_weekday(year, 2, 0, 3)
+        memorial = self._last_weekday(year, 5, 0)
+        juneteenth = self._observed(date(year, 6, 19))
+        independence = self._observed(date(year, 7, 4))
+        labor = self._nth_weekday(year, 9, 0, 1)
+        thanksgiving = self._nth_weekday(year, 11, 3, 4)
+        christmas = self._observed(date(year, 12, 25))
+        return {
+            new_year,
+            mlk,
+            presidents,
+            memorial,
+            juneteenth,
+            independence,
+            labor,
+            thanksgiving,
+            christmas,
+        }
+
+    def _is_trading_day(self, d: date) -> bool:
+        if d.weekday() >= 5:
+            return False
+        holidays = self._us_market_holidays(d.year)
+        return d not in holidays
+
     def _previous_trading_day(self, d: date) -> date:
-        # weekend-aware fallback when full exchange calendar is unavailable
         d = d - timedelta(days=1)
-        while d.weekday() >= 5:  # 5/6 => Sat/Sun
+        while not self._is_trading_day(d):
             d -= timedelta(days=1)
         return d
 

@@ -155,6 +155,31 @@ class RealtimeMarketLoop:
                 self.last_bar_ts[symbol] = bar.ts
             self._refresh_state_features(symbol)
 
+    def _update_regime(self) -> None:
+        # benchmark-first quick regime heuristic
+        for bench in ("SPY", "QQQ"):
+            st = self.store.symbols.get(bench)
+            if not st:
+                continue
+            bars = list(st.minute_bars)
+            if len(bars) < 31:
+                continue
+            last = bars[-1]
+            prev = bars[-31]
+            if prev.close == 0:
+                continue
+            ret30 = last.close / prev.close - 1
+            vwap = st.vwap_session or last.close
+            if last.close > vwap and ret30 > 0.002:
+                self.regime = "trend_up"
+                return
+            if last.close < vwap and ret30 < -0.002:
+                self.regime = "trend_down"
+                return
+            self.regime = "choppy"
+            return
+        self.regime = "choppy"
+
     def _record_interval_snapshot(self, now_utc: datetime) -> None:
         if not self.repo:
             return
@@ -237,6 +262,7 @@ class RealtimeMarketLoop:
         try:
             while True:
                 now = datetime.now(tz=timezone.utc)
+                self._update_regime()
                 self._record_interval_snapshot(now)
                 if self._reconnected:
                     await self._backfill_after_reconnect()
