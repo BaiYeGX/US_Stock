@@ -52,32 +52,18 @@ class ScoreBoardService:
         unique_symbols = list(UNIQUE_SYMBOLS)
         daily_map: dict[str, list] = {}
         weekly_map: dict[str, list] = {}
-        m30_map: dict[str, list] = {}
         earnings_days: dict[str, int | None] = {}
 
         end = datetime.now(tz=timezone.utc)
         start_daily = end - timedelta(days=220)
-        start_30m = end - timedelta(days=15)
 
         for symbol in unique_symbols:
-            if self.budget.can_call_rest():
-                q = self.data_service.get_quote(source, api_key, symbol, ttl=20)
-                self.budget.record_rest()
-            else:
-                q = {"c": 0, "dp": 0, "t": 0}
             if self.budget.can_call_rest():
                 d = provider.get_historical_bars(symbol, "1d", start_daily, end)
                 self.budget.record_rest()
             else:
                 d = []
             daily_map[symbol] = d
-
-            if self.budget.can_call_rest():
-                m30 = provider.get_historical_bars(symbol, "30m", start_30m, end)
-                self.budget.record_rest()
-            else:
-                m30 = []
-            m30_map[symbol] = m30
 
             if self.budget.can_call_rest():
                 w = provider.get_historical_bars(symbol, "1w", start_daily, end)

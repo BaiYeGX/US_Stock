@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from app.services.exchange_session import classify_market_status
@@ -54,11 +54,23 @@ class MarketTimeService:
         now_ny = self.now_ny().time()
         return session_closed and now_ny >= time(16, 1)
 
+    def ny_close_timestamp(self, exchange_date: str) -> str:
+        d = date.fromisoformat(exchange_date)
+        close_dt = datetime(d.year, d.month, d.day, 16, 0, tzinfo=NY)
+        return close_dt.isoformat()
+
+    def _previous_trading_day(self, d: date) -> date:
+        # weekend-aware fallback when full exchange calendar is unavailable
+        d = d - timedelta(days=1)
+        while d.weekday() >= 5:  # 5/6 => Sat/Sun
+            d -= timedelta(days=1)
+        return d
+
     def get_latest_completed_exchange_date(self, payload: dict | None = None) -> str:
         now = self.now_ny()
+        today = now.date()
         if payload is not None and self.has_regular_session_closed_today(payload):
-            return now.date().isoformat()
-        # 常规收盘前默认返回上一交易日（简化按自然日回退）
+            return today.isoformat()
         if now.time() < time(16, 0):
-            return (now.date() - timedelta(days=1)).isoformat()
-        return now.date().isoformat()
+            return self._previous_trading_day(today).isoformat()
+        return today.isoformat()

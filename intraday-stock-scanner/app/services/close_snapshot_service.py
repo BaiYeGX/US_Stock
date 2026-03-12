@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
 from app.db.migrations import create_all
 from app.services.market_time_service import MarketTimeService
 from app.services.scoreboard_service import ScoreBoardService
+
+
+logger = logging.getLogger(__name__)
 
 
 class CloseSnapshotService:
@@ -67,7 +71,7 @@ class CloseSnapshotService:
             "snapshot_type": "official_close_snapshot",
             "score_basis": "official_close",
             "exchange_date": exchange_date,
-            "exchange_close_timestamp_ny": f"{exchange_date}T16:00:00-05:00",
+            "exchange_close_timestamp_ny": self.time_service.ny_close_timestamp(exchange_date),
             "snapshot_generated_timestamp_ny": now_ny.isoformat(),
             "snapshot_generated_timestamp_shanghai": now_sh.isoformat(),
             "local_saved_timestamp": datetime.now(tz=timezone.utc).isoformat(),
@@ -110,7 +114,7 @@ class CloseSnapshotService:
         return {"ok": True, "created": created, "exchange_date": exchange_date, "payload": payload, "file_status": file_status}
 
     def backfill_latest(self, source: str, api_key: str) -> dict:
-        return self.capture(source=source, api_key=api_key, generated_by="backfill", is_backfilled=True, force=True)
+        return self.capture(source=source, api_key=api_key, generated_by="backfill", is_backfilled=True, force=False)
 
     def _write_files(self, exchange_date: str, payload: dict) -> dict:
         out_dir = Path("data/snapshots")
@@ -123,7 +127,9 @@ class CloseSnapshotService:
             json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
             status["json_ok"] = True
         except Exception as exc:  # pragma: no cover
-            status["errors"].append(f"json写入失败: {exc}")
+            msg = f"json写入失败: {exc}"
+            logger.exception(msg)
+            status["errors"].append(msg)
 
         try:
             rows = payload.get("rows", [])
@@ -143,6 +149,8 @@ class CloseSnapshotService:
             txt_path.write_text("\n".join(lines), encoding="utf-8")
             status["txt_ok"] = True
         except Exception as exc:  # pragma: no cover
-            status["errors"].append(f"txt写入失败: {exc}")
+            msg = f"txt写入失败: {exc}"
+            logger.exception(msg)
+            status["errors"].append(msg)
 
         return status

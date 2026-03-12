@@ -7,7 +7,9 @@ from datetime import date
 
 from app.db.migrations import create_all
 from app.db.session import make_session_factory
+from app.journal.replay import replay_alerts
 from app.journal.repository import JournalRepository
+from app.constants import FIXED_SYMBOL_POOL
 from app.providers.base import AssetMeta, BaseProvider, ProviderHealth
 from app.providers.finnhub import FinnhubProvider
 from app.services.market_loop import RealtimeMarketLoop
@@ -19,9 +21,8 @@ from app.settings import load_settings
 class MockProvider(BaseProvider):
     def get_universe_metadata(self):
         return [
-            AssetMeta(symbol="NVDA", name="NVIDIA", asset_type="stock", exchange="NASDAQ", is_active=True, sector="Semiconductors", industry="Semis"),
-            AssetMeta(symbol="AAPL", name="Apple", asset_type="stock", exchange="NASDAQ", is_active=True, sector="Technology", industry="Consumer"),
-            AssetMeta(symbol="TSLA", name="Tesla", asset_type="stock", exchange="NASDAQ", is_active=True, sector="Auto", industry="EV"),
+            AssetMeta(symbol=s, name=s, asset_type="etf" if s in {"QQQ", "SMH", "SPY", "SOXX"} else "stock", exchange="NASDAQ", is_active=True, sector=None, industry=None)
+            for s in FIXED_SYMBOL_POOL
         ]
 
     def get_grouped_daily(self, day): return []
@@ -85,14 +86,15 @@ def main() -> None:
     repo = _repo()
 
     if args.cmd == "premarket-scan":
-        watchlist = run_premarket_scan(MockProvider(), repo, settings, date.fromisoformat(args.scan_date))
+        use_mock = not bool(os.getenv("FINNHUB_API_KEY"))
+        watchlist = run_premarket_scan(_provider(use_mock), repo, settings, date.fromisoformat(args.scan_date))
         print(f"watchlist size={len(watchlist)}")
     elif args.cmd == "market-loop":
         provider = _provider(args.mock)
         if args.symbols:
             symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
         else:
-            symbols = ["NVDA", "AAPL", "TSLA"] if args.mock else ["AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "META", "AMD", "AVGO"]
+            symbols = list(FIXED_SYMBOL_POOL)
         print(f"starting market loop for {symbols} (mock={args.mock})")
         loop = RealtimeMarketLoop(provider=provider, symbols=symbols, repo=repo)
         asyncio.run(loop.run())
@@ -100,7 +102,10 @@ def main() -> None:
         summary = run_review(repo.session_factory, date.fromisoformat(args.scan_date))
         print(summary["markdown"])
     elif args.cmd == "replay-alerts":
-        print(f"replay for {args.scan_date} not yet wired")
+        rows = replay_alerts(repo.session_factory, date.fromisoformat(args.scan_date))
+        print(f"replay alerts={len(rows)}")
+        for row in rows[:20]:
+            print(f"{row['ts']} {row['symbol']} {row['setup']} score={row['score']} grade={row['grade']}")
     elif args.cmd == "seed-universe":
         print("mock universe seeded logically")
     elif args.cmd == "serve-ui":
