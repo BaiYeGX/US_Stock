@@ -8,6 +8,9 @@ from app.db.session import make_session_factory
 from app.services.local_position_store import LocalPositionStore
 from app.services.score_engine import ScoreConfig
 from app.services.scoreboard_service import RefreshConfig, ScoreBoardService
+from app.services.close_snapshot_service import CloseSnapshotService
+from app.services.after_hours_review_service import AfterHoursReviewService
+from app.services.market_time_service import MarketTimeService
 
 
 def _safe_text(v) -> str:
@@ -30,6 +33,9 @@ def create_app(db_url: str):
     session_factory = make_session_factory(db_url)
     scoreboard_service = ScoreBoardService(session_factory)
     position_store = LocalPositionStore(session_factory)
+    close_snapshot_service = CloseSnapshotService(session_factory)
+    after_hours_service = AfterHoursReviewService()
+    time_service = MarketTimeService()
 
     app = FastAPI(title="2-5日多头波段评分与执行监控")
 
@@ -37,6 +43,61 @@ def create_app(db_url: str):
     def health():
         return {"ok": True}
 
+
+    @app.get("/api/market-status")
+    def api_market_status(source: str = "finnhub", api_key: str = ""):
+        if not api_key:
+            return JSONResponse({"ok": False, "detail": "缺少 API 密钥"}, status_code=400)
+        provider = scoreboard_service.data_service._provider(source, api_key)
+        payload = provider.get_market_status() if hasattr(provider, "get_market_status") else {"market": "unknown"}
+        state = time_service.classify_from_status(payload)
+        return JSONResponse({
+            "ok": True,
+            "market_status": state.market_status,
+            "ny_time": time_service.to_newyork_display(state.exchange_tz_now),
+            "shanghai_time": time_service.to_shanghai_display(state.exchange_tz_now),
+            "exchange_date": time_service.get_exchange_date(),
+            "has_regular_closed": time_service.has_regular_session_closed_today(payload),
+            "in_close_window": time_service.get_today_close_trigger_window(payload),
+        })
+
+    @app.get("/api/official-close-snapshot/latest")
+    def api_official_latest():
+        payload = close_snapshot_service.get_latest()
+        if not payload:
+            return JSONResponse({"ok": False, "detail": "暂无正式收盘快照"}, status_code=404)
+        return JSONResponse({"ok": True, "payload": payload})
+
+    @app.get("/api/official-close-snapshot/{exchange_date}")
+    def api_official_by_date(exchange_date: str):
+        payload = close_snapshot_service.get_by_date(exchange_date)
+        if not payload:
+            return JSONResponse({"ok": False, "detail": "指定日期快照不存在"}, status_code=404)
+        return JSONResponse({"ok": True, "payload": payload})
+
+    @app.post("/api/official-close-snapshot/capture")
+    def api_official_capture(source: str = "finnhub", api_key: str = ""):
+        if not api_key:
+            return JSONResponse({"ok": False, "detail": "缺少 API 密钥"}, status_code=400)
+        result = close_snapshot_service.capture(source=source, api_key=api_key)
+        return JSONResponse({"ok": True, **result})
+
+    @app.post("/api/official-close-snapshot/backfill-latest")
+    def api_official_backfill(source: str = "finnhub", api_key: str = ""):
+        if not api_key:
+            return JSONResponse({"ok": False, "detail": "缺少 API 密钥"}, status_code=400)
+        result = close_snapshot_service.backfill_latest(source=source, api_key=api_key)
+        return JSONResponse({"ok": True, **result})
+
+    @app.get("/api/after-hours-review/latest")
+    def api_after_hours_latest(source: str = "finnhub", api_key: str = ""):
+        if not api_key:
+            return JSONResponse({"ok": False, "detail": "缺少 API 密钥"}, status_code=400)
+        latest = close_snapshot_service.get_latest()
+        if not latest:
+            return JSONResponse({"ok": False, "detail": "暂无正式快照"}, status_code=404)
+        review = after_hours_service.build(source=source, api_key=api_key, official_snapshot=latest)
+        return JSONResponse({"ok": True, "payload": review})
     @app.get("/api/scoreboard")
     def api_scoreboard(source: str = "finnhub", api_key: str = ""):
         if not api_key:
@@ -110,6 +171,16 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ border-bottom:1px sol
         <div id='ny-clock' style='font-size:34px;font-weight:700;letter-spacing:1px;'>--:--:--</div>
       </div>
     </div>
+  </div>
+
+  <div class='card panel' id='official-banner' style='margin-bottom:12px;'>
+    <h3>主评分依据：前一交易日正式收盘快照（上海时间主显示）</h3>
+    <div id='official-banner-content' class='state warn'>加载中...</div>
+  </div>
+
+  <div class='card panel' id='afterhours-card' style='margin-bottom:12px;'>
+    <h3>盘后/盘前补充状态（不改写正式评分）</h3>
+    <div id='afterhours-content' class='state warn'>加载中...</div>
   </div>
 
   <div class='grid-top'>
@@ -194,6 +265,8 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ border-bottom:1px sol
 <script>
 const LS='swing.cn.settings.v2';
 let rows=[];
+const officialBannerContent=document.getElementById('official-banner-content');
+const afterhoursContent=document.getElementById('afterhours-content');
 function fmt(v, digits=3){{
   if(v===null||v===undefined) return '数据不足';
   const s=String(v);
@@ -262,10 +335,37 @@ function showDetail(sym){{
 function _safe(v){{return v===undefined||v===null?'数据不足':v;}}
 async function loadScoreboard(){{
   if(!apiKey.value.trim()){{connState.textContent='连接状态：缺少 API 密钥';connState.className='state err';return;}}
-  const r=await fetch(`/api/scoreboard?source=${{encodeURIComponent(source.value)}}&api_key=${{encodeURIComponent(apiKey.value.trim())}}`);
-  const d=await r.json();
-  if(!d.ok){{connState.textContent='请求失败：'+(d.detail||'未知错误');connState.className='state err';return;}}
-  renderMain(d);
+  // 1) 先读正式快照
+  let snapRes = await fetch(`/api/official-close-snapshot/latest`);
+  let snap = await snapRes.json();
+  if(!snap.ok){{
+    const backfill = await fetch(`/api/official-close-snapshot/backfill-latest?source=${{encodeURIComponent(source.value)}}&api_key=${{encodeURIComponent(apiKey.value.trim())}}`, {{method:'POST'}});
+    const backfillData = await backfill.json();
+    if(!backfillData.ok){{connState.textContent='快照补录失败：'+(backfillData.detail||'未知错误');connState.className='state err';return;}}
+    snapRes = await fetch(`/api/official-close-snapshot/latest`);
+    snap = await snapRes.json();
+  }}
+  if(!snap.ok){{connState.textContent='读取正式快照失败';connState.className='state err';return;}}
+  const payload = snap.payload;
+  renderMain(payload);
+  const m = payload.meta||{{}};
+  officialBannerContent.textContent = `交易所日期(纽约)：${{m.exchange_date||payload.exchange_date||'--'}}｜快照生成(上海)：${{payload.snapshot_generated_timestamp_shanghai||'--'}}｜是否补录：${{m.is_backfilled?'是':'否'}}｜来源：${{m.snapshot_generated_by||payload.snapshot_generated_by||'auto'}}`;
+
+  // 2) 再读市场状态
+  const ms = await fetch(`/api/market-status?source=${{encodeURIComponent(source.value)}}&api_key=${{encodeURIComponent(apiKey.value.trim())}}`);
+  const msd = await ms.json();
+  if(msd.ok){{
+    mStatus.textContent=msd.market_status;
+    lastUpdate.textContent='最近更新时间（上海）：'+(msd.shanghai_time||'--');
+  }}
+
+  // 3) 盘后/盘前补充状态
+  const ah = await fetch(`/api/after-hours-review/latest?source=${{encodeURIComponent(source.value)}}&api_key=${{encodeURIComponent(apiKey.value.trim())}}`);
+  const ahd = await ah.json();
+  if(ahd.ok){{
+    const first = (ahd.payload.items||[]).slice(0,3).map(x=>`${{x.symbol}} ${{fmt(x.afterHoursChangePctVsClose,2)}}%(${{x.afterHoursRiskFlag}})`).join(' | ');
+    afterhoursContent.textContent = `状态：${{ahd.payload.market_status_label_cn}}｜复核时间(上海)：${{ahd.payload.review_timestamp_shanghai}}｜示例：${{first||'暂无'}}`;
+  }}
 }}
 async function savePos(){{
   const symbol=posSymbol.value.trim().toUpperCase(); if(!symbol) return;

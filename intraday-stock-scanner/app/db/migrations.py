@@ -56,6 +56,17 @@ def create_all(conn) -> None:
         holding_days INTEGER,
         updated_at TEXT
     )""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS official_close_snapshots (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        exchange_date TEXT UNIQUE,
+        snapshot_type TEXT,
+        score_basis TEXT,
+        payload_json TEXT,
+        is_backfilled INTEGER DEFAULT 0,
+        snapshot_generated_by TEXT DEFAULT 'auto',
+        created_at TEXT,
+        updated_at TEXT
+    )""")
     cur.execute("""CREATE TABLE IF NOT EXISTS interval_snapshots (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         trade_date TEXT,
