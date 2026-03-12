@@ -43,6 +43,19 @@ def create_all(conn) -> None:
         reason TEXT,
         metrics_json TEXT
     )""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS position_states (
+        symbol TEXT PRIMARY KEY,
+        is_held INTEGER,
+        entry_filled REAL,
+        entry_date TEXT,
+        held_position_size_shares INTEGER,
+        r_init REAL,
+        highest_close_since_entry REAL,
+        stop0_t REAL,
+        trail_stop_t REAL,
+        holding_days INTEGER,
+        updated_at TEXT
+    )""")
     cur.execute("""CREATE TABLE IF NOT EXISTS interval_snapshots (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         trade_date TEXT,

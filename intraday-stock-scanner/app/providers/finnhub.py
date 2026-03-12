@@ -111,8 +111,12 @@ class FinnhubProvider(BaseProvider):
         resolution = "1"
         if timeframe == "5m":
             resolution = "5"
+        elif timeframe == "30m":
+            resolution = "30"
         elif timeframe in {"1d", "day"}:
             resolution = "D"
+        elif timeframe in {"1w", "week"}:
+            resolution = "W"
         raw = self.get_candles(symbol, resolution, int(start.timestamp()), int(end.timestamp()))
         if raw.get("s") != "ok":
             return []
@@ -184,6 +188,19 @@ class FinnhubProvider(BaseProvider):
                     }
                 )
             await asyncio.sleep(60)
+
+    def get_market_status(self) -> dict:
+        raw = self._get_json("/stock/market-status", {"exchange": "US"})
+        return raw if isinstance(raw, dict) else {"market": "unknown"}
+
+    def get_earnings_calendar(self, symbol: str, from_date: str, to_date: str) -> list[dict]:
+        raw = self._get_json(
+            "/calendar/earnings",
+            {"symbol": symbol, "from": from_date, "to": to_date},
+        )
+        if isinstance(raw, dict):
+            return raw.get("earningsCalendar", []) or []
+        return []
 
     def healthcheck(self) -> ProviderHealth:
         if not self.api_key:

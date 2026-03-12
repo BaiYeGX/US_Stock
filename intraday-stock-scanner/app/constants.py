@@ -1,4 +1,33 @@
-from zoneinfo import ZoneInfo
+from __future__ import annotations
 
-APP_TZ = ZoneInfo("America/New_York")
-SETUPS = ("ORB", "VWAP_RECLAIM", "HOD_BREAKOUT")
+FIXED_SYMBOL_POOL: list[str] = [
+    "NVDA",
+    "AMD",
+    "QQQ",
+    "SMH",
+    "AVGO",
+    "TSM",
+    "AMZN",
+    "META",
+    "MSFT",
+    "GOOGL",
+    "SPY",
+    "SOXX",
+]
+
+BENCHMARK_MAP: dict[str, str] = {
+    "NVDA": "SMH",
+    "AMD": "SMH",
+    "AVGO": "SMH",
+    "TSM": "SMH",
+    "SMH": "SMH",
+    "SOXX": "SMH",
+    "AMZN": "QQQ",
+    "META": "QQQ",
+    "MSFT": "QQQ",
+    "GOOGL": "QQQ",
+    "QQQ": "QQQ",
+    "SPY": "SPY",
+}
+
+UNIQUE_SYMBOLS: list[str] = sorted(set(FIXED_SYMBOL_POOL))
