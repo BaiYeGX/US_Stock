@@ -10,24 +10,49 @@ _SIMPLE_HTML = """<!doctype html>
   <meta name='viewport' content='width=device-width, initial-scale=1' />
   <title>波段评分与执行监控系统</title>
   <style>
-    body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif; background:#f3f6fb; margin:0; }
-    .wrap { max-width: 860px; margin: 40px auto; padding: 20px; }
-    .card { background:#fff; border:1px solid #e5e7eb; border-radius:14px; padding:18px; box-shadow:0 6px 18px rgba(15,23,42,.06); }
-    h1 { margin:0 0 10px; font-size:24px; }
-    p { color:#475569; line-height:1.7; }
-    code { background:#f1f5f9; padding:2px 6px; border-radius:6px; }
+    :root{--bg:#f1f5f9;--card:#fff;--line:#e2e8f0;--txt:#0f172a;--muted:#475569;--blue:#2563eb}
+    *{box-sizing:border-box} body{margin:0;background:radial-gradient(circle at top,#dbeafe,#f8fafc 38%,#f1f5f9);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;color:var(--txt)}
+    .wrap{max-width:1100px;margin:28px auto;padding:18px}
+    .hero{background:linear-gradient(135deg,#0f172a,#1e293b);color:#fff;border-radius:20px;padding:26px;box-shadow:0 16px 42px rgba(15,23,42,.25)}
+    .hero h1{margin:0;font-size:34px}
+    .sub{margin-top:8px;opacity:.84}
+    .clock-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:18px}
+    .clock{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);border-radius:14px;padding:14px 16px}
+    .clock .k{opacity:.8;font-size:13px}.clock .v{font-size:44px;font-weight:800;letter-spacing:1px;margin-top:4px}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px;margin-top:14px;box-shadow:0 8px 20px rgba(15,23,42,.06)}
+    .btn{display:inline-block;background:var(--blue);color:#fff;text-decoration:none;padding:10px 14px;border-radius:10px;font-weight:600}
+    @media(max-width:900px){.clock-grid{grid-template-columns:1fr}.clock .v{font-size:32px}.hero h1{font-size:26px}}
   </style>
 </head>
 <body>
   <div class='wrap'>
-    <div class='card'>
-      <h1>简易模式已启动</h1>
-      <p>当前环境未加载 FastAPI/Uvicorn，已切换到内置简易页面。</p>
-      <p>如需完整中文控制台（评分、动作分解、持仓设置、数据源设置），请安装依赖后重新运行：</p>
-      <p><code>pip install fastapi uvicorn</code></p>
-      <p>然后执行：<code>python -m app.cli serve-ui --host 127.0.0.1 --port 8000</code></p>
-    </div>
+    <section class='hero'>
+      <h1>2~5日多头波段评分系统</h1>
+      <div class='sub'>当前为降级展示模式（缺少 FastAPI/Uvicorn），已保留核心视觉与实时双时区电子时钟。</div>
+      <div class='clock-grid'>
+        <div class='clock'><div class='k'>北京时间（Asia/Shanghai）</div><div class='v' id='bj-clock'>--:--:--</div></div>
+        <div class='clock'><div class='k'>纽约时间（America/New_York）</div><div class='v' id='ny-clock'>--:--:--</div></div>
+      </div>
+    </section>
+
+    <section class='card'>
+      <h3 style='margin:0 0 8px'>如何启用完整版 UI</h3>
+      <p style='color:var(--muted);line-height:1.75'>请在可联网 pip 环境安装依赖后启动：<code>pip install fastapi uvicorn</code>，再运行 <code>python -m app.cli serve-ui --host 127.0.0.1 --port 8000</code>。</p>
+      <p><a class='btn' href='/health'>检查服务健康状态</a></p>
+    </section>
   </div>
+
+<script>
+function tick(){
+  const now = new Date();
+  const bj = now.toLocaleString('zh-CN',{hour12:false,timeZone:'Asia/Shanghai'});
+  const ny = now.toLocaleString('zh-CN',{hour12:false,timeZone:'America/New_York'});
+  document.getElementById('bj-clock').textContent = bj;
+  document.getElementById('ny-clock').textContent = ny;
+}
+tick();
+setInterval(tick,1000);
+</script>
 </body>
 </html>"""
 

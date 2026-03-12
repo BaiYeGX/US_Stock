@@ -70,12 +70,12 @@ def create_app(db_url: str):
 <style>
 :root {{ --bg:#f3f6fb; --card:#fff; --line:#e5e7eb; --txt:#111827; --muted:#6b7280; --blue:#2563eb; --green:#16a34a; --red:#dc2626; --amber:#d97706; }}
 * {{ box-sizing:border-box; }} body {{ margin:0; background:var(--bg); color:var(--txt); font-family:'Segoe UI',Arial; }}
-.wrap {{ max-width:1600px; margin:0 auto; padding:18px; }}
+.wrap {{ max-width:1600px; margin:0 auto; padding:24px; }}
 .header {{ display:flex; justify-content:space-between; align-items:end; margin-bottom:14px; }}
 .header h1 {{ margin:0; font-size:28px; }} .sub {{ color:var(--muted); font-size:12px; }}
 .badge {{ padding:6px 10px; border-radius:999px; background:#e0ecff; color:#1d4ed8; font-size:12px; }}
 .grid-top {{ display:grid; grid-template-columns:repeat(5,1fr); gap:10px; }}
-.card {{ background:var(--card); border:1px solid var(--line); border-radius:14px; box-shadow:0 6px 22px rgba(15,23,42,.06); }}
+.card {{ background:var(--card); border:1px solid var(--line); border-radius:16px; box-shadow:0 10px 30px rgba(15,23,42,.08); }}
 .metric {{ padding:12px; }} .k {{ color:var(--muted); font-size:12px; }} .v {{ font-size:24px; font-weight:700; margin-top:5px; }}
 .main {{ display:grid; grid-template-columns:360px 1fr; gap:12px; margin-top:12px; }}
 .panel {{ padding:14px; }} h3 {{ margin:0 0 10px 0; font-size:16px; }}
@@ -86,7 +86,7 @@ button {{ border:none; border-radius:8px; padding:8px 10px; font-size:12px; curs
 .pri {{ background:var(--blue); color:#fff; }} .subbtn {{ background:#e8efff; color:#1d4ed8; }} .plain {{ background:#f3f4f6; }}
 .state {{ font-size:12px; margin-top:8px; }} .ok {{ color:var(--green); }} .err {{ color:var(--red); }} .warn {{ color:var(--amber); }}
 .section {{ margin-top:10px; }}
-table {{ width:100%; border-collapse:collapse; }} th,td {{ border-bottom:1px solid var(--line); padding:7px; font-size:12px; text-align:left; }} th {{ background:#f8fafc; color:#334155; position:sticky; top:0; }}
+table {{ width:100%; border-collapse:collapse; }} th,td {{ border-bottom:1px solid var(--line); padding:7px; font-size:12px; text-align:left; }} th {{ background:#f8fafc; color:#334155; position:sticky; top:0; backdrop-filter: blur(2px); }}
 .tag {{ padding:2px 6px; border-radius:6px; font-size:11px; color:#fff; display:inline-block; }}
 .a5,.s5 {{ background:#16a34a; }} .a4,.s4 {{ background:#2563eb; }} .a3,.s3 {{ background:#0ea5e9; }} .a2,.s2 {{ background:#d97706; }} .a1,.s1 {{ background:#ef4444; }} .a0,.s0 {{ background:#6b7280; }}
 .details {{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }}
@@ -97,6 +97,19 @@ table {{ width:100%; border-collapse:collapse; }} th,td {{ border-bottom:1px sol
   <div class='header'>
     <div><h1>12只固定股票池 · 2~5交易日多头波段评分系统</h1><div class='sub'>交易日：{d}｜时区：America/New_York｜仅多头，不做空</div></div>
     <div class='badge'>数据源：Finnhub Free（免费模式）</div>
+  </div>
+
+  <div class='card panel' style='margin-bottom:12px;background:linear-gradient(135deg,#1e293b,#0f172a);color:#fff;'>
+    <div style='display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;'>
+      <div>
+        <div style='font-size:14px;opacity:.8;'>实时电子时钟</div>
+        <div style='font-size:26px;font-weight:700;margin-top:6px;'>北京时间 <span id='bj-clock' style='font-size:34px;letter-spacing:1px;'>--:--:--</span></div>
+      </div>
+      <div style='text-align:right;'>
+        <div style='font-size:14px;opacity:.8;'>纽约时间（America/New_York）</div>
+        <div id='ny-clock' style='font-size:34px;font-weight:700;letter-spacing:1px;'>--:--:--</div>
+      </div>
+    </div>
   </div>
 
   <div class='grid-top'>
@@ -278,6 +291,19 @@ btnTest.onclick=testConn;
 btnClear.onclick=()=>{{apiKey.value=''; saveSettings(); connState.textContent='连接状态：未配置'; connState.className='state err';}};
 toggleKey.onclick=()=>{{apiKey.type=(apiKey.type==='password'?'text':'password'); toggleKey.textContent=(apiKey.type==='password'?'显示':'隐藏');}};
 btnPosSave.onclick=savePos;
+const bjClock=document.getElementById('bj-clock');
+const nyClock=document.getElementById('ny-clock');
+
+function updateClocks(){{
+  const now = new Date();
+  const bj = now.toLocaleString('zh-CN', {{hour12:false,timeZone:'Asia/Shanghai'}});
+  const ny = now.toLocaleString('zh-CN', {{hour12:false,timeZone:'America/New_York'}});
+  bjClock.textContent = bj;
+  nyClock.textContent = ny;
+}}
+
+updateClocks();
+setInterval(updateClocks,1000);
 loadSettings();
 if(apiKey.value) loadScoreboard();
 setInterval(()=>{{ if(apiKey.value) loadScoreboard(); }}, 60000);
