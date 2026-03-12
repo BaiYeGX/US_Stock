@@ -39,11 +39,26 @@ def create_app(db_url: str):
 
     app = FastAPI(title="2-5日多头波段评分与执行监控")
 
-    def _api_key(request: Request, query_key: str = "") -> str:
-        header_key = request.headers.get("X-API-Key", "").strip()
-        if header_key:
-            return header_key
-        return (query_key or "").strip()
+    def _api_key(request: Request) -> str:
+        return request.headers.get("X-API-Key", "").strip()
+
+
+    @app.on_event("startup")
+    async def startup_capture_snapshot() -> None:
+        import os
+
+        source = "finnhub"
+        api_key = os.getenv("FINNHUB_API_KEY", "").strip()
+        if not api_key:
+            return
+        try:
+            provider = scoreboard_service.data_service._provider(source, api_key)
+            payload = provider.get_market_status() if hasattr(provider, "get_market_status") else {"market": "unknown"}
+            if time_service.get_today_close_trigger_window(payload):
+                close_snapshot_service.capture(source=source, api_key=api_key, generated_by="auto", force=False)
+        except Exception:
+            # 启动时兜底，不阻断服务
+            return
 
     @app.get("/health")
     def health():
@@ -51,8 +66,8 @@ def create_app(db_url: str):
 
 
     @app.get("/api/market-status")
-    def api_market_status(request: Request, source: str = "finnhub", api_key: str = ""):
-        api_key = _api_key(request, api_key)
+    def api_market_status(request: Request, source: str = "finnhub"):
+        api_key = _api_key(request)
         if not api_key:
             return JSONResponse({"ok": False, "detail": "缺少 API 密钥"}, status_code=400)
         provider = scoreboard_service.data_service._provider(source, api_key)
@@ -83,24 +98,24 @@ def create_app(db_url: str):
         return JSONResponse({"ok": True, "payload": payload})
 
     @app.post("/api/official-close-snapshot/capture")
-    def api_official_capture(request: Request, source: str = "finnhub", api_key: str = ""):
-        api_key = _api_key(request, api_key)
+    def api_official_capture(request: Request, source: str = "finnhub"):
+        api_key = _api_key(request)
         if not api_key:
             return JSONResponse({"ok": False, "detail": "缺少 API 密钥"}, status_code=400)
         result = close_snapshot_service.capture(source=source, api_key=api_key)
         return JSONResponse({"ok": True, **result})
 
     @app.post("/api/official-close-snapshot/backfill-latest")
-    def api_official_backfill(request: Request, source: str = "finnhub", api_key: str = ""):
-        api_key = _api_key(request, api_key)
+    def api_official_backfill(request: Request, source: str = "finnhub"):
+        api_key = _api_key(request)
         if not api_key:
             return JSONResponse({"ok": False, "detail": "缺少 API 密钥"}, status_code=400)
         result = close_snapshot_service.backfill_latest(source=source, api_key=api_key)
         return JSONResponse({"ok": True, **result})
 
     @app.get("/api/after-hours-review/latest")
-    def api_after_hours_latest(request: Request, source: str = "finnhub", api_key: str = ""):
-        api_key = _api_key(request, api_key)
+    def api_after_hours_latest(request: Request, source: str = "finnhub"):
+        api_key = _api_key(request)
         if not api_key:
             return JSONResponse({"ok": False, "detail": "缺少 API 密钥"}, status_code=400)
         latest = close_snapshot_service.get_latest()
@@ -109,8 +124,8 @@ def create_app(db_url: str):
         review = after_hours_service.build(source=source, api_key=api_key, official_snapshot=latest)
         return JSONResponse({"ok": True, "payload": review})
     @app.get("/api/scoreboard")
-    def api_scoreboard(request: Request, source: str = "finnhub", api_key: str = ""):
-        api_key = _api_key(request, api_key)
+    def api_scoreboard(request: Request, source: str = "finnhub"):
+        api_key = _api_key(request)
         if not api_key:
             return JSONResponse({"ok": False, "detail": "缺少 API 密钥"}, status_code=400)
         try:

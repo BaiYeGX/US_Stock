@@ -4,13 +4,14 @@ import asyncio
 from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+from app.constants import BENCHMARK_MAP
 from app.scoring.filters import hard_filter
 from app.scoring.intraday_score import compute_ias
+from app.services.alert_engine import AlertEngine
 from app.setups.hod_breakout import detect_hod_breakout
 from app.setups.orb import detect_orb
 from app.setups.vwap_reclaim import detect_vwap_reclaim
 from app.state.state_store import StateStore
-from app.services.alert_engine import AlertEngine
 
 NY_TZ = ZoneInfo("America/New_York")
 MARKET_OPEN = time(9, 30)
@@ -54,6 +55,60 @@ class RealtimeMarketLoop:
         self._alert_count = 0
         self.alert_engine = AlertEngine(cooldown_minutes=5)
 
+    def _refresh_state_features(self, symbol: str) -> None:
+        state = self.store.get_or_create(symbol)
+        bars = list(state.minute_bars)
+        if not bars:
+            return
+
+        # open range from first 5 completed minute bars
+        if len(bars) >= 5 and state.open_range_high is None:
+            first = bars[:5]
+            state.open_range_high = max(b.high for b in first)
+            state.open_range_low = min(b.low for b in first)
+
+        # session vwap
+        total_vol = sum(b.volume for b in bars)
+        if total_vol > 0:
+            state.vwap_session = sum(b.close * b.volume for b in bars) / total_vol
+
+        # spread proxy from bar range (no L1 quote in minute-bar stream)
+        last = bars[-1]
+        if last.close > 0:
+            state.spread_pct = max(0.0, ((last.high - last.low) / last.close) * 100)
+
+        # minute RVOL proxy: current minute volume vs recent 20 minute average
+        if len(bars) >= 21:
+            avg20 = sum(b.volume for b in bars[-21:-1]) / 20
+            state.rvol = (last.volume / avg20) if avg20 > 0 else None
+
+        # intraday ATR proxy in pct from latest 20 bars
+        window = bars[-20:]
+        if window and last.close > 0:
+            avg_range = sum((b.high - b.low) for b in window) / len(window)
+            state.atr20_pct = (avg_range / last.close) * 100
+
+    def _refresh_relative_strength(self) -> None:
+        # use 15m return proxy based on available minute bars; benchmark from fixed mapping
+        for symbol, state in self.store.symbols.items():
+            bars = list(state.minute_bars)
+            if len(bars) < 16:
+                continue
+            symbol_ret = (bars[-1].close / bars[-16].close - 1) if bars[-16].close else 0.0
+            bench_symbol = BENCHMARK_MAP.get(symbol)
+            if not bench_symbol:
+                continue
+            bench_state = self.store.symbols.get(bench_symbol)
+            if not bench_state:
+                continue
+            bench_bars = list(bench_state.minute_bars)
+            if len(bench_bars) < 16 or bench_bars[-16].close == 0:
+                continue
+            bench_ret = bench_bars[-1].close / bench_bars[-16].close - 1
+            state.rs_vs_benchmark_15m = symbol_ret - bench_ret
+            # no sector index stream here, mirror benchmark for now
+            state.rs_vs_sector_15m = state.rs_vs_benchmark_15m
+
     async def _on_minute_bar(self, event: dict) -> None:
         if event.get("ev") == "SYSTEM" and event.get("type") == "reconnected":
             self._reconnected = True
@@ -78,6 +133,7 @@ class RealtimeMarketLoop:
         state.intraday_low = low if state.intraday_low is None else min(state.intraday_low, low)
         state.cumulative_volume += vol
         self.last_bar_ts[symbol] = ts
+        self._refresh_state_features(symbol)
 
     async def _backfill_after_reconnect(self) -> None:
         now = datetime.now(tz=timezone.utc)
@@ -97,6 +153,7 @@ class RealtimeMarketLoop:
                 state.intraday_low = bar.low if state.intraday_low is None else min(state.intraday_low, bar.low)
                 state.cumulative_volume += bar.volume
                 self.last_bar_ts[symbol] = bar.ts
+            self._refresh_state_features(symbol)
 
     def _record_interval_snapshot(self, now_utc: datetime) -> None:
         if not self.repo:
@@ -138,13 +195,14 @@ class RealtimeMarketLoop:
         self._recorded_slots.add(key)
 
     def _scan_and_emit_alerts(self, now_utc: datetime) -> None:
+        self._refresh_relative_strength()
         pools = {
             "rs_benchmark": [],
             "rs_sector": [],
             "rvol": [],
-            "atr": [],
+            "atr20": [],
             "spread": [],
-            "dollar_vol": [],
+            "dollar5m": [],
             "room": [],
         }
         states = list(self.store.symbols.values())
@@ -152,9 +210,9 @@ class RealtimeMarketLoop:
             pools["rs_benchmark"].append(st.rs_vs_benchmark_15m or 0.0)
             pools["rs_sector"].append(st.rs_vs_sector_15m or 0.0)
             pools["rvol"].append(st.rvol or 0.0)
-            pools["atr"].append(st.atr20_pct or 0.0)
+            pools["atr20"].append(st.atr20_pct or 0.0)
             pools["spread"].append(st.spread_pct or 0.2)
-            pools["dollar_vol"].append(3_000_000)
+            pools["dollar5m"].append((st.last_price or 0.0) * max(st.cumulative_volume, 1.0) / 78)
             pools["room"].append(2.0)
 
         for st in states:
@@ -197,5 +255,17 @@ def evaluate_symbol(state, now: datetime, pools: dict[str, list[float]], regime:
     fr = hard_filter(state, state.last_price or 0, 50_000_000, 0.15, 1.5, 2.5, 1.2, risk_pct)
     if not fr.passed:
         return None, None, fr.reasons
-    score = compute_ias(signal.setup_score, state.rs_vs_benchmark_15m or 0, state.rs_vs_sector_15m or 0, state.rvol or 0, state.atr20_pct or 0, state.spread_pct or 0.2, 3_000_000, regime, signal.side, 80, pools)
+    score = compute_ias(
+        signal.setup_score,
+        state.rs_vs_benchmark_15m or 0,
+        state.rs_vs_sector_15m or 0,
+        state.rvol or 0,
+        state.atr20_pct or 0,
+        state.spread_pct or 0.2,
+        ((state.last_price or 0.0) * max(state.cumulative_volume, 1.0) / 78),
+        regime,
+        signal.side,
+        80,
+        pools,
+    )
     return signal, score, []
