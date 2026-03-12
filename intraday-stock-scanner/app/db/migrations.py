@@ -14,6 +14,28 @@ def create_all(conn) -> None:
         catalyst_score REAL,
         selected_flag INTEGER
     )""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS assets (
+        symbol TEXT PRIMARY KEY,
+        name TEXT,
+        asset_type TEXT,
+        sector TEXT,
+        industry TEXT,
+        is_active INTEGER,
+        updated_at TEXT
+    )""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS daily_stats (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        symbol TEXT,
+        date TEXT,
+        open REAL,
+        high REAL,
+        low REAL,
+        close REAL,
+        volume REAL,
+        dollar_volume REAL,
+        atr20_pct REAL,
+        avg_dollar_volume_20d REAL
+    )""")
     cur.execute("""CREATE TABLE IF NOT EXISTS alerts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         ts TEXT,
@@ -34,6 +56,20 @@ def create_all(conn) -> None:
         reason TEXT,
         market_regime TEXT,
         raw_metrics_json TEXT
+    )""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS alert_outcomes (
+        alert_id INTEGER PRIMARY KEY,
+        horizon_5m_ret REAL,
+        horizon_10m_ret REAL,
+        horizon_20m_ret REAL,
+        horizon_30m_ret REAL,
+        hit_tp1_first INTEGER,
+        hit_tp2_first INTEGER,
+        hit_sl_first INTEGER,
+        mfe_pct REAL,
+        mae_pct REAL,
+        closed_label TEXT,
+        evaluated_at TEXT
     )""")
     cur.execute("""CREATE TABLE IF NOT EXISTS filter_rejections (
         id INTEGER PRIMARY KEY AUTOINCREMENT,

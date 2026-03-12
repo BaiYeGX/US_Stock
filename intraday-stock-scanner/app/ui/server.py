@@ -24,7 +24,7 @@ def _safe_text(v) -> str:
 
 def create_app(db_url: str):
     try:
-        from fastapi import FastAPI
+        from fastapi import FastAPI, Request
         from fastapi.responses import HTMLResponse, JSONResponse
     except Exception as exc:  # pragma: no cover
         raise RuntimeError("FastAPI/uvicorn 未安装") from exc
@@ -39,13 +39,20 @@ def create_app(db_url: str):
 
     app = FastAPI(title="2-5日多头波段评分与执行监控")
 
+    def _api_key(request: Request, query_key: str = "") -> str:
+        header_key = request.headers.get("X-API-Key", "").strip()
+        if header_key:
+            return header_key
+        return (query_key or "").strip()
+
     @app.get("/health")
     def health():
         return {"ok": True}
 
 
     @app.get("/api/market-status")
-    def api_market_status(source: str = "finnhub", api_key: str = ""):
+    def api_market_status(request: Request, source: str = "finnhub", api_key: str = ""):
+        api_key = _api_key(request, api_key)
         if not api_key:
             return JSONResponse({"ok": False, "detail": "缺少 API 密钥"}, status_code=400)
         provider = scoreboard_service.data_service._provider(source, api_key)
@@ -76,21 +83,24 @@ def create_app(db_url: str):
         return JSONResponse({"ok": True, "payload": payload})
 
     @app.post("/api/official-close-snapshot/capture")
-    def api_official_capture(source: str = "finnhub", api_key: str = ""):
+    def api_official_capture(request: Request, source: str = "finnhub", api_key: str = ""):
+        api_key = _api_key(request, api_key)
         if not api_key:
             return JSONResponse({"ok": False, "detail": "缺少 API 密钥"}, status_code=400)
         result = close_snapshot_service.capture(source=source, api_key=api_key)
         return JSONResponse({"ok": True, **result})
 
     @app.post("/api/official-close-snapshot/backfill-latest")
-    def api_official_backfill(source: str = "finnhub", api_key: str = ""):
+    def api_official_backfill(request: Request, source: str = "finnhub", api_key: str = ""):
+        api_key = _api_key(request, api_key)
         if not api_key:
             return JSONResponse({"ok": False, "detail": "缺少 API 密钥"}, status_code=400)
         result = close_snapshot_service.backfill_latest(source=source, api_key=api_key)
         return JSONResponse({"ok": True, **result})
 
     @app.get("/api/after-hours-review/latest")
-    def api_after_hours_latest(source: str = "finnhub", api_key: str = ""):
+    def api_after_hours_latest(request: Request, source: str = "finnhub", api_key: str = ""):
+        api_key = _api_key(request, api_key)
         if not api_key:
             return JSONResponse({"ok": False, "detail": "缺少 API 密钥"}, status_code=400)
         latest = close_snapshot_service.get_latest()
@@ -99,7 +109,8 @@ def create_app(db_url: str):
         review = after_hours_service.build(source=source, api_key=api_key, official_snapshot=latest)
         return JSONResponse({"ok": True, "payload": review})
     @app.get("/api/scoreboard")
-    def api_scoreboard(source: str = "finnhub", api_key: str = ""):
+    def api_scoreboard(request: Request, source: str = "finnhub", api_key: str = ""):
+        api_key = _api_key(request, api_key)
         if not api_key:
             return JSONResponse({"ok": False, "detail": "缺少 API 密钥"}, status_code=400)
         try:
@@ -299,7 +310,7 @@ function loadSettings(){{
 async function testConn(){{
   if(!apiKey.value.trim()){{connState.textContent='连接状态：缺少 API 密钥';connState.className='state err';return;}}
   connState.textContent='连接状态：测试中...';connState.className='state warn';
-  const r=await fetch(`/api/scoreboard?source=${{encodeURIComponent(source.value)}}&api_key=${{encodeURIComponent(apiKey.value.trim())}}`);
+  const r=await fetch(`/api/scoreboard?source=${{encodeURIComponent(source.value)}}`, {{headers:{{'X-API-Key':apiKey.value.trim()}}}});
   const d=await r.json();
   if(d.ok){{connState.textContent='连接状态：连接成功';connState.className='state ok';}} else {{connState.textContent='连接状态：连接失败 - '+(d.detail||'未知错误');connState.className='state err';}}
 }}
@@ -339,7 +350,7 @@ async function loadScoreboard(){{
   let snapRes = await fetch(`/api/official-close-snapshot/latest`);
   let snap = await snapRes.json();
   if(!snap.ok){{
-    const backfill = await fetch(`/api/official-close-snapshot/backfill-latest?source=${{encodeURIComponent(source.value)}}&api_key=${{encodeURIComponent(apiKey.value.trim())}}`, {{method:'POST'}});
+    const backfill = await fetch(`/api/official-close-snapshot/backfill-latest?source=${{encodeURIComponent(source.value)}}`, {{method:'POST', headers:{{'X-API-Key':apiKey.value.trim()}}}});
     const backfillData = await backfill.json();
     if(!backfillData.ok){{connState.textContent='快照补录失败：'+(backfillData.detail||'未知错误');connState.className='state err';return;}}
     snapRes = await fetch(`/api/official-close-snapshot/latest`);
@@ -352,7 +363,7 @@ async function loadScoreboard(){{
   officialBannerContent.textContent = `交易所日期(纽约)：${{m.exchange_date||payload.exchange_date||'--'}}｜快照生成(上海)：${{payload.snapshot_generated_timestamp_shanghai||'--'}}｜是否补录：${{m.is_backfilled?'是':'否'}}｜来源：${{m.snapshot_generated_by||payload.snapshot_generated_by||'auto'}}`;
 
   // 2) 再读市场状态
-  const ms = await fetch(`/api/market-status?source=${{encodeURIComponent(source.value)}}&api_key=${{encodeURIComponent(apiKey.value.trim())}}`);
+  const ms = await fetch(`/api/market-status?source=${{encodeURIComponent(source.value)}}`, {{headers:{{'X-API-Key':apiKey.value.trim()}}}});
   const msd = await ms.json();
   if(msd.ok){{
     mStatus.textContent=msd.market_status;
@@ -360,7 +371,7 @@ async function loadScoreboard(){{
   }}
 
   // 3) 盘后/盘前补充状态
-  const ah = await fetch(`/api/after-hours-review/latest?source=${{encodeURIComponent(source.value)}}&api_key=${{encodeURIComponent(apiKey.value.trim())}}`);
+  const ah = await fetch(`/api/after-hours-review/latest?source=${{encodeURIComponent(source.value)}}`, {{headers:{{'X-API-Key':apiKey.value.trim()}}}});
   const ahd = await ah.json();
   if(ahd.ok){{
     const first = (ahd.payload.items||[]).slice(0,3).map(x=>`${{x.symbol}} ${{fmt(x.afterHoursChangePctVsClose,2)}}%(${{x.afterHoursRiskFlag}})`).join(' | ');

@@ -421,6 +421,7 @@ def compute_symbol_score(
             "AvgDollarVol20_t": avg_dollar_vol20,
             "RVOL20_t": rvol20,
             "CLV_t": clv_t,
+            "close": closes[-1],
             "Ret3_t": ret3,
             "Ret5_t": ret5,
             "ER3_t": er3,

@@ -10,6 +10,7 @@ from app.setups.hod_breakout import detect_hod_breakout
 from app.setups.orb import detect_orb
 from app.setups.vwap_reclaim import detect_vwap_reclaim
 from app.state.state_store import StateStore
+from app.services.alert_engine import AlertEngine
 
 NY_TZ = ZoneInfo("America/New_York")
 MARKET_OPEN = time(9, 30)
@@ -51,6 +52,7 @@ class RealtimeMarketLoop:
         self._reconnected = False
         self._recorded_slots: set[tuple[str, int]] = set()
         self._alert_count = 0
+        self.alert_engine = AlertEngine(cooldown_minutes=5)
 
     async def _on_minute_bar(self, event: dict) -> None:
         if event.get("ev") == "SYSTEM" and event.get("type") == "reconnected":
@@ -135,6 +137,37 @@ class RealtimeMarketLoop:
         )
         self._recorded_slots.add(key)
 
+    def _scan_and_emit_alerts(self, now_utc: datetime) -> None:
+        pools = {
+            "rs_benchmark": [],
+            "rs_sector": [],
+            "rvol": [],
+            "atr": [],
+            "spread": [],
+            "dollar_vol": [],
+            "room": [],
+        }
+        states = list(self.store.symbols.values())
+        for st in states:
+            pools["rs_benchmark"].append(st.rs_vs_benchmark_15m or 0.0)
+            pools["rs_sector"].append(st.rs_vs_sector_15m or 0.0)
+            pools["rvol"].append(st.rvol or 0.0)
+            pools["atr"].append(st.atr20_pct or 0.0)
+            pools["spread"].append(st.spread_pct or 0.2)
+            pools["dollar_vol"].append(3_000_000)
+            pools["room"].append(2.0)
+
+        for st in states:
+            signal, score, reasons = evaluate_symbol(st, now_utc, pools, self.regime)
+            if not signal or score is None:
+                if self.repo and reasons and reasons != ["no_setup"]:
+                    self.repo.save_rejection(now_utc, st.symbol, "NO_SETUP", ",".join(reasons), {"symbol": st.symbol})
+                continue
+            plan = self.alert_engine.try_emit(st.symbol, signal, score, now_utc)
+            if plan and self.repo:
+                self.repo.save_alert(plan, market_regime=self.regime)
+                self._alert_count += 1
+
     async def run(self) -> None:
         async def callback(event):
             await self._on_minute_bar(event)
@@ -150,6 +183,7 @@ class RealtimeMarketLoop:
                 if self._reconnected:
                     await self._backfill_after_reconnect()
                     self._reconnected = False
+                self._scan_and_emit_alerts(now)
                 await asyncio.sleep(30)
         finally:
             task.cancel()

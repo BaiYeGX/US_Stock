@@ -16,13 +16,19 @@ class AfterHoursReviewService:
         out = []
         for r in rows:
             symbol = r.get("Symbol")
-            entry_close = r.get("fields", {}).get("close") or r.get("Entry")
+            if not symbol:
+                continue
+            # 优先使用正式收盘快照中的 close，缺失时兼容历史快照结构
+            entry_close = r.get("fields", {}).get("close")
+            if entry_close in (None, 0, ""):
+                entry_close = r.get("Close") or r.get("Entry")
+            if entry_close in (None, 0, ""):
+                continue
+
             q = self.data.get_quote(source, api_key, symbol, ttl=20)
             last_price = float(q.get("c", 0) or 0)
-            base = float(entry_close or 0)
-            change_pct = None
-            if base > 0:
-                change_pct = (last_price / base - 1) * 100
+            base = float(entry_close)
+            change_pct = (last_price / base - 1) * 100 if base > 0 else None
             risk = "低影响"
             if change_pct is not None and abs(change_pct) >= 2.5:
                 risk = "高风险提示"

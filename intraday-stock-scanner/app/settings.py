@@ -6,6 +6,11 @@ from typing import Any
 import ast
 import os
 
+try:
+    import yaml  # type: ignore
+except Exception:  # pragma: no cover
+    yaml = None
+
 
 @dataclass
 class AppSettings:
@@ -133,7 +138,11 @@ def _load_yaml(path: str) -> dict[str, Any]:
     p = Path(path)
     if not p.exists():
         return {}
-    data = _simple_yaml_load(p.read_text(encoding="utf-8"))
+    text = p.read_text(encoding="utf-8")
+    if yaml is not None:
+        loaded = yaml.safe_load(text) or {}
+        return loaded if isinstance(loaded, dict) else {}
+    data = _simple_yaml_load(text)
     return data if isinstance(data, dict) else {}
 
 
