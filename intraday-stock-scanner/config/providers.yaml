@@ -1,0 +1,6 @@
+polygon:
+  rest_base_url: "https://api.polygon.io"
+  ws_base_url: "wss://socket.polygon.io/stocks"
+alpaca:
+  rest_base_url: "https://data.alpaca.markets"
+  ws_base_url: "wss://stream.data.alpaca.markets/v2"
